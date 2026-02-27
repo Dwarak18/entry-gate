@@ -34,6 +34,7 @@ CREATE TABLE team_questions (
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
     question_order INTEGER NOT NULL,
+    section VARCHAR(20),
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(team_id, question_id)
 );
@@ -58,6 +59,16 @@ CREATE TABLE results (
     time_taken INTEGER CHECK (time_taken >= 0), -- in seconds
     submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(team_id)
+);
+
+-- Team sections (tracks section completion per team)
+CREATE TABLE team_sections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    section_name VARCHAR(20) NOT NULL CHECK (section_name IN ('C', 'Python', 'Java', 'SQL')),
+    completed BOOLEAN DEFAULT FALSE,
+    completed_at TIMESTAMP,
+    UNIQUE(team_id, section_name)
 );
 
 -- Create indexes for better performance

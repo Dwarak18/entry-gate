@@ -8,6 +8,9 @@ const router = express.Router();
 const QUIZ_DURATION = 60 * 60; // 60 minutes in seconds
 const GRACE_PERIOD = 30; // 30 seconds grace for network latency
 
+// Fixed section order
+const SECTION_ORDER = ['C', 'Python', 'Java', 'SQL'];
+
 // Helper: check if quiz time has expired server-side
 async function checkQuizTimeExpired(teamId) {
   const result = await pool.query(
@@ -43,14 +46,41 @@ router.post('/answer', authenticateToken, validateAnswer, async (req, res) => {
       return res.status(403).json({ error: 'Quiz time has expired. You can no longer save answers.' });
     }
 
-    // Verify this question is assigned to this team
+    // Verify this question is assigned to this team (and get its section)
     const assignedCheck = await pool.query(
-      'SELECT id FROM team_questions WHERE team_id = $1 AND question_id = $2',
+      'SELECT id, section FROM team_questions WHERE team_id = $1 AND question_id = $2',
       [teamId, question_id]
     );
 
     if (assignedCheck.rows.length === 0) {
       return res.status(403).json({ error: 'Question not assigned to your team' });
+    }
+
+    // Enforce section ordering: can only answer questions in the current or completed sections
+    const questionSection = assignedCheck.rows[0].section;
+    if (questionSection) {
+      const sectionStatus = await pool.query(
+        `SELECT section_name, completed FROM team_sections WHERE team_id = $1`,
+        [teamId]
+      );
+      const sectionMap = {};
+      for (const row of sectionStatus.rows) {
+        sectionMap[row.section_name] = row.completed;
+      }
+      
+      // Find current active section (first non-completed)
+      const currentSectionIdx = SECTION_ORDER.findIndex(s => !sectionMap[s]);
+      const questionSectionIdx = SECTION_ORDER.indexOf(questionSection);
+      
+      // Allow answers only in current active section (or already completed sections for re-answers)
+      if (questionSectionIdx > currentSectionIdx && currentSectionIdx !== -1) {
+        return res.status(403).json({ error: 'This section is locked. Complete the current section first.' });
+      }
+      
+      // Don't allow modifying answers in completed sections
+      if (sectionMap[questionSection] === true) {
+        return res.status(403).json({ error: 'This section is already completed. Answers are read-only.' });
+      }
     }
 
     // Check if already submitted
@@ -95,6 +125,85 @@ router.post('/answer', authenticateToken, validateAnswer, async (req, res) => {
   }
 });
 
+// Complete a section (lock it and advance)
+router.post('/complete-section', authenticateToken, async (req, res) => {
+  try {
+    const teamId = req.user.id;
+    const { section_name } = req.body;
+
+    if (!section_name || !SECTION_ORDER.includes(section_name)) {
+      return res.status(400).json({ error: 'Invalid section name' });
+    }
+
+    // Server-side time check
+    const expired = await checkQuizTimeExpired(teamId);
+    if (expired) {
+      return res.status(403).json({ error: 'Quiz time has expired.' });
+    }
+
+    // Check already submitted
+    const submissionCheck = await pool.query(
+      'SELECT id FROM results WHERE team_id = $1',
+      [teamId]
+    );
+    if (submissionCheck.rows.length > 0) {
+      return res.status(403).json({ error: 'Quiz already submitted' });
+    }
+
+    // Verify all previous sections are completed
+    const sectionIdx = SECTION_ORDER.indexOf(section_name);
+    if (sectionIdx > 0) {
+      const prevSections = SECTION_ORDER.slice(0, sectionIdx);
+      const prevCheck = await pool.query(
+        `SELECT section_name, completed FROM team_sections 
+         WHERE team_id = $1 AND section_name = ANY($2)`,
+        [teamId, prevSections]
+      );
+      const allPrevCompleted = prevCheck.rows.length === prevSections.length && 
+                                prevCheck.rows.every(r => r.completed);
+      if (!allPrevCompleted) {
+        return res.status(403).json({ error: 'Previous sections must be completed first.' });
+      }
+    }
+
+    // Verify all questions in this section are answered
+    const unanswered = await pool.query(
+      `SELECT tq.question_id FROM team_questions tq
+       LEFT JOIN team_attempts ta ON ta.team_id = tq.team_id AND ta.question_id = tq.question_id
+       WHERE tq.team_id = $1 AND tq.section = $2 AND ta.selected_answer IS NULL`,
+      [teamId, section_name]
+    );
+    if (unanswered.rows.length > 0) {
+      return res.status(400).json({ 
+        error: `Answer all questions in ${section_name} section before completing it.`,
+        unanswered_count: unanswered.rows.length
+      });
+    }
+
+    // Mark section as completed
+    await pool.query(
+      `UPDATE team_sections SET completed = TRUE, completed_at = CURRENT_TIMESTAMP
+       WHERE team_id = $1 AND section_name = $2`,
+      [teamId, section_name]
+    );
+
+    // Find next section
+    const nextIdx = sectionIdx + 1;
+    const nextSection = nextIdx < SECTION_ORDER.length ? SECTION_ORDER[nextIdx] : null;
+
+    res.json({
+      message: `${section_name} section completed`,
+      completed: section_name,
+      next_section: nextSection,
+      all_complete: nextSection === null
+    });
+
+  } catch (error) {
+    console.error('Error completing section:', error);
+    res.status(500).json({ error: 'Failed to complete section' });
+  }
+});
+
 // Submit final quiz
 router.post('/submit', authenticateToken, async (req, res) => {
   const client = await pool.connect();
@@ -104,6 +213,16 @@ router.post('/submit', authenticateToken, async (req, res) => {
 
     // Server-side time calculation (ignore client-provided time_taken)
     const timeTaken = await calculateTimeTaken(teamId);
+
+    // Verify all 4 sections are completed before final submit
+    const sectionsCheck = await pool.query(
+      `SELECT COUNT(*) as completed_count FROM team_sections
+       WHERE team_id = $1 AND completed = TRUE`,
+      [teamId]
+    );
+    if (parseInt(sectionsCheck.rows[0].completed_count) < 4) {
+      return res.status(403).json({ error: 'All sections must be completed before submitting.' });
+    }
 
     await client.query('BEGIN');
 

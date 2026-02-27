@@ -14,7 +14,15 @@ function fisherYatesShuffle(array) {
   return arr;
 }
 
-// Assign random questions to team (called on first access)
+// Section order and expected counts
+const SECTIONS = [
+  { name: 'C', count: 12 },
+  { name: 'Python', count: 12 },
+  { name: 'Java', count: 13 },
+  { name: 'SQL', count: 13 },
+];
+
+// Assign questions to team grouped by section, shuffled within each
 async function assignQuestionsToTeam(teamId) {
   const client = await pool.connect();
   
@@ -36,25 +44,55 @@ async function assignQuestionsToTeam(teamId) {
       return; // Questions already assigned
     }
 
-    // Fetch ALL 50 questions from database
-    const questionsResult = await client.query('SELECT id FROM questions');
-    let allQuestions = questionsResult.rows.map(row => ({ question_id: row.id }));
+    // Fetch ALL questions grouped by category
+    const questionsResult = await client.query('SELECT id, category FROM questions');
+    const byCategory = {};
+    for (const row of questionsResult.rows) {
+      if (!byCategory[row.category]) byCategory[row.category] = [];
+      byCategory[row.category].push(row.id);
+    }
 
-    // Shuffle with Fisher-Yates (unbiased) — each team gets a unique order
-    allQuestions = fisherYatesShuffle(allQuestions);
+    // Build ordered list: C(1-12), Python(13-24), Java(25-37), SQL(38-50)
+    // Shuffle within each category using Fisher-Yates
+    const orderedQuestions = [];
+    for (const section of SECTIONS) {
+      const categoryQuestions = byCategory[section.name];
+      if (!categoryQuestions || categoryQuestions.length < section.count) {
+        throw new Error(`Not enough ${section.name} questions: have ${categoryQuestions?.length || 0}, need ${section.count}`);
+      }
+      const shuffled = fisherYatesShuffle(categoryQuestions).slice(0, section.count);
+      for (const qId of shuffled) {
+        orderedQuestions.push({ question_id: qId, section: section.name });
+      }
+    }
 
-    // Parameterized batch INSERT for all 50 questions
+    // Parameterized batch INSERT for all 50 questions (with section)
     const params = [];
-    const valuePlaceholders = allQuestions.map((q, i) => {
-      const offset = i * 3;
-      params.push(teamId, q.question_id, i + 1);
-      return `($${offset + 1}, $${offset + 2}, $${offset + 3})`;
+    const valuePlaceholders = orderedQuestions.map((q, i) => {
+      const offset = i * 4;
+      params.push(teamId, q.question_id, i + 1, q.section);
+      return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`;
     }).join(', ');
 
     await client.query(
-      `INSERT INTO team_questions (team_id, question_id, question_order)
+      `INSERT INTO team_questions (team_id, question_id, question_order, section)
        VALUES ${valuePlaceholders}`,
       params
+    );
+
+    // Initialize section tracking rows
+    const sectionParams = [];
+    const sectionPlaceholders = SECTIONS.map((s, i) => {
+      const offset = i * 2;
+      sectionParams.push(teamId, s.name);
+      return `($${offset + 1}, $${offset + 2}, FALSE)`;
+    }).join(', ');
+
+    await client.query(
+      `INSERT INTO team_sections (team_id, section_name, completed)
+       VALUES ${sectionPlaceholders}
+       ON CONFLICT (team_id, section_name) DO NOTHING`,
+      sectionParams
     );
 
     // Record quiz start time (server-side timer)
@@ -64,7 +102,7 @@ async function assignQuestionsToTeam(teamId) {
     );
 
     await client.query('COMMIT');
-    console.log(`✅ Assigned ${allQuestions.length} questions to team ${teamId}`);
+    console.log(`✅ Assigned ${orderedQuestions.length} questions to team ${teamId} (sectioned)`);
 
   } catch (error) {
     await client.query('ROLLBACK');
@@ -97,7 +135,7 @@ router.get('/', authenticateToken, async (req, res) => {
       serverTimeRemaining = Math.max(0, QUIZ_DURATION - elapsed);
     }
 
-    // Fetch assigned questions with their order
+    // Fetch assigned questions with their order and section
     const result = await pool.query(
       `SELECT 
         q.id,
@@ -108,12 +146,25 @@ router.get('/', authenticateToken, async (req, res) => {
         q.option_c,
         q.option_d,
         tq.question_order,
+        tq.section,
         ta.selected_answer
        FROM team_questions tq
        JOIN questions q ON tq.question_id = q.id
        LEFT JOIN team_attempts ta ON ta.team_id = tq.team_id AND ta.question_id = q.id
        WHERE tq.team_id = $1
        ORDER BY tq.question_order`,
+      [teamId]
+    );
+
+    // Fetch section completion status
+    const sectionsResult = await pool.query(
+      `SELECT section_name, completed, completed_at
+       FROM team_sections
+       WHERE team_id = $1
+       ORDER BY CASE section_name
+         WHEN 'C' THEN 1 WHEN 'Python' THEN 2
+         WHEN 'Java' THEN 3 WHEN 'SQL' THEN 4
+       END`,
       [teamId]
     );
 
@@ -127,11 +178,19 @@ router.get('/', authenticateToken, async (req, res) => {
       option_c: q.option_c,
       option_d: q.option_d,
       question_order: q.question_order,
+      section: q.section,
       selected_answer: q.selected_answer || null
+    }));
+
+    const sections = sectionsResult.rows.map(s => ({
+      name: s.section_name,
+      completed: s.completed,
+      completed_at: s.completed_at
     }));
 
     res.json({
       questions,
+      sections,
       total: questions.length,
       serverTimeRemaining,
       quizStartedAt

@@ -51,6 +51,8 @@ export const useQuizStore = create((set) => ({
   quizStarted: false,
   quizSubmitted: false,
   score: null,
+  sections: [],           // [{name, completed, completed_at}]
+  currentSection: 'C',    // Active section name
   
   setQuestions: (questions) => set({ questions }),
   
@@ -69,6 +71,28 @@ export const useQuizStore = create((set) => ({
   
   startQuiz: () => set({ quizStarted: true }),
   
+  setSections: (sections) => {
+    // Determine current active section (first non-completed)
+    const sectionOrder = ['C', 'Python', 'Java', 'SQL'];
+    const currentSection = sectionOrder.find(name => {
+      const s = sections.find(sec => sec.name === name);
+      return !s || !s.completed;
+    }) || null; // null = all complete
+    set({ sections, currentSection });
+  },
+  
+  completeSection: (sectionName) => set((state) => {
+    const sectionOrder = ['C', 'Python', 'Java', 'SQL'];
+    const updatedSections = state.sections.map(s =>
+      s.name === sectionName ? { ...s, completed: true, completed_at: new Date().toISOString() } : s
+    );
+    const nextSection = sectionOrder.find(name => {
+      const s = updatedSections.find(sec => sec.name === name);
+      return !s || !s.completed;
+    }) || null;
+    return { sections: updatedSections, currentSection: nextSection };
+  }),
+  
   submitQuiz: (score) => set({ 
     quizSubmitted: true, 
     score 
@@ -82,5 +106,7 @@ export const useQuizStore = create((set) => ({
     quizStarted: false,
     quizSubmitted: false,
     score: null,
+    sections: [],
+    currentSection: 'C',
   }),
 }));

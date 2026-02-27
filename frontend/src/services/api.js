@@ -52,6 +52,7 @@ export const questionsAPI = {
 // Submissions APIs
 export const submissionsAPI = {
   saveAnswer: (data) => api.post('/submissions/answer', data),
+  completeSection: (data) => api.post('/submissions/complete-section', data),
   submitQuiz: (data) => api.post('/submissions/submit', data),
   getStatus: () => api.get('/submissions/status'),
 };
