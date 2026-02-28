@@ -17,3 +17,12 @@ export const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// Rate limiter for anti-cheat activity logging
+export const activityLogLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 12, // 12 log events per minute max
+  message: 'Too many activity log requests.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});

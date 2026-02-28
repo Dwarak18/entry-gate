@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/store';
 import { adminAPI } from '../services/api';
@@ -7,20 +7,39 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { logout } = useAuthStore();
   
-  const [activeTab, setActiveTab] = useState('teams'); // teams, leaderboard, upload
+  const [activeTab, setActiveTab] = useState('teams');
   const [teams, setTeams] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [cheatLogs, setCheatLogs] = useState({ logs: [], summary: [] });
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const refreshIntervalRef = useRef(null);
 
   useEffect(() => {
     if (activeTab === 'teams') {
       fetchTeams();
     } else if (activeTab === 'leaderboard') {
       fetchLeaderboard();
+    } else if (activeTab === 'activity') {
+      fetchCheatLogs();
     }
+  }, [activeTab]);
+
+  // Auto-refresh leaderboard every 10 seconds
+  useEffect(() => {
+    if (activeTab === 'leaderboard') {
+      refreshIntervalRef.current = setInterval(() => {
+        fetchLeaderboard(true);
+      }, 10000);
+    }
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+        refreshIntervalRef.current = null;
+      }
+    };
   }, [activeTab]);
 
   const fetchTeams = async () => {
@@ -36,14 +55,27 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchLeaderboard = async () => {
-    setLoading(true);
+  const fetchLeaderboard = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const response = await adminAPI.getLeaderboard();
       setLeaderboard(response.data.leaderboard);
     } catch (error) {
       console.error('Error fetching leaderboard:', error);
-      alert('Failed to fetch leaderboard');
+      if (!silent) alert('Failed to fetch leaderboard');
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const fetchCheatLogs = async () => {
+    setLoading(true);
+    try {
+      const response = await adminAPI.getCheatLogs();
+      setCheatLogs(response.data);
+    } catch (error) {
+      console.error('Error fetching cheat logs:', error);
+      alert('Failed to fetch activity logs');
     } finally {
       setLoading(false);
     }
@@ -71,11 +103,9 @@ export default function AdminDashboard() {
       setUploadResult(response.data);
       setSelectedFile(null);
       
-      // Reset file input
       const fileInput = document.getElementById('file-upload');
       if (fileInput) fileInput.value = '';
 
-      // Refresh teams if on teams tab
       if (activeTab === 'teams') {
         fetchTeams();
       }
@@ -91,11 +121,10 @@ export default function AdminDashboard() {
     try {
       const response = await adminAPI.exportResults();
       
-      // Create download link
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `results-${Date.now()}.xlsx`);
+      link.setAttribute('download', 'results-' + Date.now() + '.xlsx');
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -106,7 +135,7 @@ export default function AdminDashboard() {
   };
 
   const handleDeleteTeam = async (teamId, teamName) => {
-    const confirm = window.confirm(`Are you sure you want to delete team "${teamName}"?`);
+    const confirm = window.confirm('Are you sure you want to delete team "' + teamName + '"?');
     if (!confirm) return;
 
     try {
@@ -115,6 +144,20 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error('Error deleting team:', error);
       alert('Failed to delete team');
+    }
+  };
+
+  const handleResetTeam = async (teamId, teamName) => {
+    const confirm = window.confirm('Reset quiz for team "' + teamName + '"? This will clear all their answers, sections, and timer so they can retake the quiz.');
+    if (!confirm) return;
+
+    try {
+      await adminAPI.resetTeam(teamId);
+      alert('Quiz reset for "' + teamName + '" — they can now retake the quiz.');
+      fetchTeams();
+    } catch (error) {
+      console.error('Error resetting team:', error);
+      alert('Failed to reset team');
     }
   };
 
@@ -131,10 +174,22 @@ export default function AdminDashboard() {
     };
 
     return (
-      <span className={`px-3 py-1 rounded-xl text-xs font-medium ${styles[status]}`}>
+      <span className={'px-3 py-1 rounded-xl text-xs font-medium ' + styles[status]}>
         {status.replace('-', ' ').toUpperCase()}
       </span>
     );
+  };
+
+  const getThreatLevel = (totalEvents) => {
+    if (totalEvents >= 10) return { label: 'HIGH', class: 'cheat-badge-high' };
+    if (totalEvents >= 5) return { label: 'MEDIUM', class: 'cheat-badge-medium' };
+    return { label: 'LOW', class: 'cheat-badge-low' };
+  };
+
+  const formatTimestamp = (ts) => {
+    if (!ts) return 'N/A';
+    const d = new Date(ts);
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
   return (
@@ -165,33 +220,43 @@ export default function AdminDashboard() {
           <div className="surface-1 rounded-2xl shadow-elevated-1 p-1.5 flex gap-1.5">
             <button
               onClick={() => setActiveTab('upload')}
-              className={`flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
+              className={'flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ' + (
                 activeTab === 'upload'
                   ? 'bg-secondary-container border border-secondary/20 text-secondary'
                   : 'text-on-surface-variant hover:bg-surface-bright'
-              }`}
+              )}
             >
-              📤 Upload Teams
+              Upload Teams
             </button>
             <button
               onClick={() => setActiveTab('teams')}
-              className={`flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
+              className={'flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ' + (
                 activeTab === 'teams'
                   ? 'bg-primary-container border border-primary/20 text-primary'
                   : 'text-on-surface-variant hover:bg-surface-bright'
-              }`}
+              )}
             >
-              👥 Teams ({teams.length})
+              Teams ({teams.length})
             </button>
             <button
               onClick={() => setActiveTab('leaderboard')}
-              className={`flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ${
+              className={'flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ' + (
                 activeTab === 'leaderboard'
                   ? 'bg-success-container border border-success/20 text-success'
                   : 'text-on-surface-variant hover:bg-surface-bright'
-              }`}
+              )}
             >
-              🏆 Leaderboard
+              Leaderboard
+            </button>
+            <button
+              onClick={() => setActiveTab('activity')}
+              className={'flex-1 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 ' + (
+                activeTab === 'activity'
+                  ? 'bg-error-container border border-error/20 text-error'
+                  : 'text-on-surface-variant hover:bg-surface-bright'
+              )}
+            >
+              Activity Monitor
             </button>
           </div>
         </div>
@@ -249,19 +314,19 @@ export default function AdminDashboard() {
             </button>
 
             {uploadResult && (
-              <div className={`mt-4 p-4 rounded-2xl ${
+              <div className={'mt-4 p-4 rounded-2xl ' + (
                 uploadResult.created > 0
                   ? 'surface-2 border border-success/20'
                   : 'surface-2 border border-warning/20'
-              }`}>
+              )}>
                 <h4 className="font-semibold mb-2 text-on-surface text-sm">
                   Upload Results:
                 </h4>
                 <p className="text-on-surface-variant text-sm">
-                  ✅ Created: {uploadResult.created} teams
+                  Created: {uploadResult.created} teams
                 </p>
                 <p className="text-on-surface-variant text-sm">
-                  ⏭️ Skipped: {uploadResult.skipped} teams
+                  Skipped: {uploadResult.skipped} teams
                 </p>
                 {uploadResult.errors && uploadResult.errors.length > 0 && (
                   <details className="mt-2">
@@ -290,7 +355,7 @@ export default function AdminDashboard() {
                 Registered Teams
               </h2>
               <button onClick={fetchTeams} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
-                🔄 Refresh
+                Refresh
               </button>
             </div>
 
@@ -331,18 +396,26 @@ export default function AdminDashboard() {
                           {getStatusBadge(team.status)}
                         </td>
                         <td className="p-3 font-semibold text-on-surface font-mono text-sm">
-                          {team.score !== null && team.score !== undefined ? `${team.score}/20` : '-'}
+                          {team.score !== null && team.score !== undefined ? team.score + '/50' : '-'}
                         </td>
                         <td className="p-3 text-on-surface-variant font-mono text-sm">
-                          {team.answered_count}/20
+                          {team.answered_count}/50
                         </td>
                         <td className="p-3">
-                          <button
-                            onClick={() => handleDeleteTeam(team.id, team.team_name)}
-                            className="px-3 py-1.5 rounded-xl bg-error-container text-error border border-error/20 hover:bg-error/20 text-xs font-medium transition-all duration-200"
-                          >
-                            Delete
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleResetTeam(team.id, team.team_name)}
+                              className="px-3 py-1.5 rounded-xl bg-warning-container text-warning border border-warning/20 hover:bg-warning/20 text-xs font-medium transition-all duration-200"
+                            >
+                              Reset
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTeam(team.id, team.team_name)}
+                              className="px-3 py-1.5 rounded-xl bg-error-container text-error border border-error/20 hover:bg-error/20 text-xs font-medium transition-all duration-200"
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -357,15 +430,18 @@ export default function AdminDashboard() {
         {activeTab === 'leaderboard' && (
           <div className="surface-1 rounded-3xl shadow-elevated-2 p-6 animate-fade-in">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-on-surface">
-                Leaderboard
-              </h2>
+              <div>
+                <h2 className="text-xl font-semibold text-on-surface">
+                  Leaderboard
+                </h2>
+                <p className="text-xs text-on-surface-variant mt-1">Auto-refreshes every 10 seconds</p>
+              </div>
               <div className="flex gap-2">
-                <button onClick={fetchLeaderboard} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
-                  🔄 Refresh
+                <button onClick={() => fetchLeaderboard()} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
+                  Refresh
                 </button>
                 <button onClick={handleExportResults} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
-                  📥 Export CSV
+                  Export
                 </button>
               </div>
             </div>
@@ -379,60 +455,185 @@ export default function AdminDashboard() {
                 No results available yet
               </p>
             ) : (
-              <div className="space-y-2">
-                {leaderboard.map((entry) => (
-                  <div
-                    key={entry.rank}
-                    className={`p-4 rounded-2xl flex items-center justify-between transition-all duration-200 border ${
-                      entry.rank === 1
-                        ? 'bg-yellow-500/8 border-yellow-500/20'
-                        : entry.rank === 2
-                        ? 'bg-gray-400/5 border-gray-400/15'
-                        : entry.rank === 3
-                        ? 'bg-orange-500/5 border-orange-500/15'
-                        : 'surface-2'
-                    }`}
-                  >
-                    <div className="flex items-center gap-4 flex-1">
-                      <div className={`text-xl font-bold ${
-                        entry.rank === 1 ? 'rank-gold' :
-                        entry.rank === 2 ? 'rank-silver' :
-                        entry.rank === 3 ? 'rank-bronze' :
-                        'text-on-surface-variant'
-                      }`}>
-                        #{entry.rank}
-                      </div>
-                      <div>
-                        <div className="font-semibold text-on-surface text-sm">
-                          {entry.team_name}
-                        </div>
-                        <div className="text-xs text-on-surface-variant font-mono">
-                          {entry.team_id}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                      <div className="text-center">
-                        <div className="text-sm font-semibold text-success font-mono">
-                          {(Number.isFinite(entry.accuracy) ? entry.accuracy : 0).toFixed(1)}%
-                        </div>
-                        <div className="text-[10px] text-on-surface-variant">
-                          Accuracy
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-lg font-bold text-primary font-mono">
-                          {entry.score}/{entry.total}
-                        </div>
-                        <div className="text-xs text-on-surface-variant font-mono">
-                          {entry.time_taken ? `${Math.floor(entry.time_taken / 60)}m ${entry.time_taken % 60}s` : 'N/A'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <div className="overflow-x-auto rounded-2xl">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-outline">
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Rank</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Team</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">C</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Python</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Java</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">SQL</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Total</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Accuracy</th>
+                      <th className="p-3 text-right text-on-surface-variant text-xs font-medium">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {leaderboard.map((entry) => (
+                      <tr
+                        key={entry.rank}
+                        className={'border-b border-outline-variant hover:bg-surface-bright transition-colors duration-150 ' + (
+                          entry.rank === 1
+                            ? 'bg-yellow-500/5'
+                            : entry.rank === 2
+                            ? 'bg-gray-400/5'
+                            : entry.rank === 3
+                            ? 'bg-orange-500/5'
+                            : ''
+                        )}
+                      >
+                        <td className="p-3">
+                          <span className={'text-lg font-bold ' + (
+                            entry.rank === 1 ? 'rank-gold' :
+                            entry.rank === 2 ? 'rank-silver' :
+                            entry.rank === 3 ? 'rank-bronze' :
+                            'text-on-surface-variant'
+                          )}>
+                            #{entry.rank}
+                          </span>
+                        </td>
+                        <td className="p-3">
+                          <div className="font-semibold text-on-surface text-sm">{entry.team_name}</div>
+                          <div className="text-xs text-on-surface-variant font-mono">{entry.team_id}</div>
+                        </td>
+                        <td className="p-3 text-center font-mono text-sm text-on-surface-variant">
+                          <span className="font-semibold text-on-surface">{entry.c_score}</span>/12
+                        </td>
+                        <td className="p-3 text-center font-mono text-sm text-on-surface-variant">
+                          <span className="font-semibold text-on-surface">{entry.python_score}</span>/12
+                        </td>
+                        <td className="p-3 text-center font-mono text-sm text-on-surface-variant">
+                          <span className="font-semibold text-on-surface">{entry.java_score}</span>/13
+                        </td>
+                        <td className="p-3 text-center font-mono text-sm text-on-surface-variant">
+                          <span className="font-semibold text-on-surface">{entry.sql_score}</span>/13
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="font-bold text-primary font-mono text-lg">{entry.score}</span>
+                          <span className="text-on-surface-variant text-xs font-mono">/{entry.total}</span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className="text-sm font-semibold text-success font-mono">
+                            {(Number.isFinite(entry.accuracy) ? entry.accuracy : 0).toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="p-3 text-right text-xs text-on-surface-variant font-mono">
+                          {entry.time_taken ? Math.floor(entry.time_taken / 60) + 'm ' + (entry.time_taken % 60) + 's' : 'N/A'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Activity Monitor Tab */}
+        {activeTab === 'activity' && (
+          <div className="animate-fade-in space-y-6">
+            {/* Summary Cards */}
+            <div className="surface-1 rounded-3xl shadow-elevated-2 p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold text-on-surface">
+                  Activity Summary
+                </h2>
+                <button onClick={fetchCheatLogs} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
+                  Refresh
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="text-center py-12">
+                  <div className="animate-spin rounded-full h-10 w-10 spinner-m3 mx-auto"></div>
+                </div>
+              ) : cheatLogs.summary.length === 0 ? (
+                <p className="text-center py-8 text-on-surface-variant">
+                  No suspicious activity detected yet
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-2xl">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-outline">
+                        <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Team</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Risk</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Total</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Tab Switches</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Window Blur</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">DevTools</th>
+                        <th className="p-3 text-center text-on-surface-variant text-xs font-medium">Fullscreen Exit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cheatLogs.summary.map((row) => {
+                        const threat = getThreatLevel(row.total_events);
+                        return (
+                          <tr key={row.team_id} className="border-b border-outline-variant hover:bg-surface-bright transition-colors duration-150">
+                            <td className="p-3">
+                              <div className="font-semibold text-on-surface text-sm">{row.team_name}</div>
+                              <div className="text-xs text-on-surface-variant font-mono">{row.team_id}</div>
+                            </td>
+                            <td className="p-3 text-center">
+                              <span className={'px-3 py-1 rounded-xl text-xs font-bold ' + threat.class}>
+                                {threat.label}
+                              </span>
+                            </td>
+                            <td className="p-3 text-center font-bold text-on-surface font-mono">{row.total_events}</td>
+                            <td className="p-3 text-center font-mono text-on-surface-variant">{row.tab_switches}</td>
+                            <td className="p-3 text-center font-mono text-on-surface-variant">{row.window_blurs}</td>
+                            <td className="p-3 text-center font-mono text-on-surface-variant">
+                              <span className={row.devtools_opens > 0 ? 'text-error font-bold' : ''}>{row.devtools_opens}</span>
+                            </td>
+                            <td className="p-3 text-center font-mono text-on-surface-variant">{row.fullscreen_exits}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Recent Activity Log */}
+            <div className="surface-1 rounded-3xl shadow-elevated-2 p-6">
+              <h2 className="text-lg font-semibold text-on-surface mb-4">
+                Recent Activity Log
+              </h2>
+
+              {cheatLogs.logs.length === 0 ? (
+                <p className="text-center py-8 text-on-surface-variant">
+                  No activity logs yet
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-96 overflow-y-auto">
+                  {cheatLogs.logs.slice(0, 100).map((log) => (
+                    <div key={log.id} className="flex items-center gap-3 p-3 rounded-xl surface-2">
+                      <span className={'px-2 py-1 rounded-lg text-[10px] font-bold min-w-[90px] text-center ' + (
+                        log.event_type === 'DEVTOOLS_OPEN' ? 'cheat-badge-high' :
+                        log.event_type === 'TAB_SWITCH' ? 'cheat-badge-medium' :
+                        log.event_type === 'WINDOW_BLUR' ? 'cheat-badge-medium' :
+                        'cheat-badge-low'
+                      )}>
+                        {log.event_type.replace('_', ' ')}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-sm font-medium text-on-surface">{log.team_name}</span>
+                        <span className="text-xs text-on-surface-variant font-mono ml-2">{log.team_id}</span>
+                        {log.details && (
+                          <p className="text-xs text-on-surface-variant/60 truncate">{log.details}</p>
+                        )}
+                      </div>
+                      <span className="text-xs text-on-surface-variant font-mono whitespace-nowrap">
+                        {formatTimestamp(log.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

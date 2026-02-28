@@ -198,7 +198,7 @@ router.get('/teams', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Get leaderboard
+// Get leaderboard (with section-wise scores)
 router.get('/leaderboard', authenticateAdmin, async (req, res) => {
   try {
     const result = await pool.query(
@@ -209,9 +209,24 @@ router.get('/leaderboard', authenticateAdmin, async (req, res) => {
         r.total_questions,
         r.time_taken,
         r.submitted_at,
-        ROUND((r.total_score::decimal / r.total_questions) * 100, 2) AS accuracy
+        ROUND((r.total_score::decimal / r.total_questions) * 100, 2) AS accuracy,
+        COALESCE(ss.c_score, 0) AS c_score,
+        COALESCE(ss.python_score, 0) AS python_score,
+        COALESCE(ss.java_score, 0) AS java_score,
+        COALESCE(ss.sql_score, 0) AS sql_score
        FROM results r
        JOIN teams t ON r.team_id = t.id
+       LEFT JOIN (
+         SELECT 
+           ta.team_id,
+           SUM(CASE WHEN q.category = 'C' AND ta.is_correct THEN 1 ELSE 0 END) AS c_score,
+           SUM(CASE WHEN q.category = 'Python' AND ta.is_correct THEN 1 ELSE 0 END) AS python_score,
+           SUM(CASE WHEN q.category = 'Java' AND ta.is_correct THEN 1 ELSE 0 END) AS java_score,
+           SUM(CASE WHEN q.category = 'SQL' AND ta.is_correct THEN 1 ELSE 0 END) AS sql_score
+         FROM team_attempts ta
+         JOIN questions q ON ta.question_id = q.id
+         GROUP BY ta.team_id
+       ) ss ON ss.team_id = t.id
        ORDER BY r.total_score DESC, r.time_taken ASC, r.submitted_at ASC`
     );
 
@@ -223,7 +238,11 @@ router.get('/leaderboard', authenticateAdmin, async (req, res) => {
       total: row.total_questions,
       time_taken: row.time_taken,
       submitted_at: row.submitted_at,
-      accuracy: parseFloat(row.accuracy)
+      accuracy: parseFloat(row.accuracy),
+      c_score: parseInt(row.c_score),
+      python_score: parseInt(row.python_score),
+      java_score: parseInt(row.java_score),
+      sql_score: parseInt(row.sql_score),
     }));
 
     res.json({ leaderboard, total: leaderboard.length });
@@ -231,6 +250,104 @@ router.get('/leaderboard', authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error fetching leaderboard:', error);
     res.status(500).json({ error: 'Failed to fetch leaderboard' });
+  }
+});
+
+// Get anti-cheat activity logs
+router.get('/cheat-logs', authenticateAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT 
+        cl.id,
+        cl.event_type,
+        cl.details,
+        cl.created_at,
+        t.team_id,
+        t.team_name
+       FROM cheat_logs cl
+       JOIN teams t ON cl.team_id = t.id
+       ORDER BY cl.created_at DESC
+       LIMIT 500`
+    );
+
+    // Also get summary counts per team
+    const summary = await pool.query(
+      `SELECT 
+        t.team_id,
+        t.team_name,
+        COUNT(*) AS total_events,
+        SUM(CASE WHEN cl.event_type = 'TAB_SWITCH' THEN 1 ELSE 0 END) AS tab_switches,
+        SUM(CASE WHEN cl.event_type = 'WINDOW_BLUR' THEN 1 ELSE 0 END) AS window_blurs,
+        SUM(CASE WHEN cl.event_type = 'DEVTOOLS_OPEN' THEN 1 ELSE 0 END) AS devtools_opens,
+        SUM(CASE WHEN cl.event_type = 'FULLSCREEN_EXIT' THEN 1 ELSE 0 END) AS fullscreen_exits
+       FROM cheat_logs cl
+       JOIN teams t ON cl.team_id = t.id
+       GROUP BY t.team_id, t.team_name
+       ORDER BY COUNT(*) DESC`
+    );
+
+    res.json({
+      logs: result.rows,
+      summary: summary.rows.map(r => ({
+        team_id: r.team_id,
+        team_name: r.team_name,
+        total_events: parseInt(r.total_events),
+        tab_switches: parseInt(r.tab_switches),
+        window_blurs: parseInt(r.window_blurs),
+        devtools_opens: parseInt(r.devtools_opens),
+        fullscreen_exits: parseInt(r.fullscreen_exits),
+      })),
+      total: result.rows.length,
+    });
+
+  } catch (error) {
+    console.error('Error fetching cheat logs:', error);
+    res.status(500).json({ error: 'Failed to fetch activity logs' });
+  }
+});
+
+// Reset a team's quiz (clear all quiz data so they can restart)
+router.post('/reset-team/:teamId', authenticateAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { teamId } = req.params;
+
+    // Verify team exists
+    const teamCheck = await client.query(
+      'SELECT team_id, team_name FROM teams WHERE id = $1',
+      [teamId]
+    );
+    if (teamCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+
+    await client.query('BEGIN');
+
+    // Delete in order: results, cheat_logs, team_attempts, team_sections, team_questions
+    await client.query('DELETE FROM results WHERE team_id = $1', [teamId]);
+    await client.query('DELETE FROM cheat_logs WHERE team_id = $1', [teamId]);
+    await client.query('DELETE FROM team_attempts WHERE team_id = $1', [teamId]);
+    await client.query('DELETE FROM team_sections WHERE team_id = $1', [teamId]);
+    await client.query('DELETE FROM team_questions WHERE team_id = $1', [teamId]);
+    // Reset quiz_started_at
+    await client.query('UPDATE teams SET quiz_started_at = NULL WHERE id = $1', [teamId]);
+
+    await client.query('COMMIT');
+
+    const team = teamCheck.rows[0];
+    console.log(`🔄 Reset quiz data for team ${team.team_id} (${team.team_name})`);
+
+    res.json({
+      message: `Quiz reset for team "${team.team_name}"`,
+      team: team
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error resetting team:', error);
+    res.status(500).json({ error: 'Failed to reset team quiz' });
+  } finally {
+    client.release();
   }
 });
 

@@ -2,6 +2,7 @@ import express from 'express';
 import pool from '../config/database.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { validateAnswer } from '../middleware/validation.js';
+import { activityLogLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -311,6 +312,74 @@ router.get('/status', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Error fetching submission status:', error);
     res.status(500).json({ error: 'Failed to fetch status' });
+  }
+});
+
+// Start quiz — sets quiz_started_at server-side (only on first call)
+router.post('/start', authenticateToken, async (req, res) => {
+  try {
+    const teamId = req.user.id;
+
+    // Check if already submitted
+    const submissionCheck = await pool.query(
+      'SELECT id FROM results WHERE team_id = $1',
+      [teamId]
+    );
+    if (submissionCheck.rows.length > 0) {
+      return res.status(403).json({ error: 'Quiz already submitted' });
+    }
+
+    // Set quiz_started_at only if not already set
+    await pool.query(
+      'UPDATE teams SET quiz_started_at = CURRENT_TIMESTAMP WHERE id = $1 AND quiz_started_at IS NULL',
+      [teamId]
+    );
+
+    // Get current quiz_started_at
+    const team = await pool.query(
+      'SELECT quiz_started_at FROM teams WHERE id = $1',
+      [teamId]
+    );
+    const startedAt = team.rows[0]?.quiz_started_at;
+    const elapsed = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+    const serverTimeRemaining = Math.max(0, QUIZ_DURATION - elapsed);
+
+    res.json({
+      quiz_started_at: startedAt,
+      serverTimeRemaining
+    });
+
+  } catch (error) {
+    console.error('Error starting quiz:', error);
+    res.status(500).json({ error: 'Failed to start quiz' });
+  }
+});
+
+// Log anti-cheat activity events
+const VALID_EVENT_TYPES = ['TAB_SWITCH', 'WINDOW_BLUR', 'DEVTOOLS_OPEN', 'FULLSCREEN_EXIT'];
+
+router.post('/log-activity', authenticateToken, activityLogLimiter, async (req, res) => {
+  try {
+    const teamId = req.user.id;
+    const { event_type, details } = req.body;
+
+    if (!event_type || !VALID_EVENT_TYPES.includes(event_type)) {
+      return res.status(400).json({ error: 'Invalid event type' });
+    }
+
+    // Sanitize details — truncate to 500 chars
+    const safeDetails = details ? String(details).slice(0, 500) : null;
+
+    await pool.query(
+      `INSERT INTO cheat_logs (team_id, event_type, details) VALUES ($1, $2, $3)`,
+      [teamId, event_type, safeDetails]
+    );
+
+    res.json({ logged: true });
+
+  } catch (error) {
+    console.error('Error logging activity:', error);
+    res.status(500).json({ error: 'Failed to log activity' });
   }
 });
 

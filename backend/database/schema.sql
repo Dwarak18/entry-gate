@@ -71,7 +71,18 @@ CREATE TABLE team_sections (
     UNIQUE(team_id, section_name)
 );
 
+-- Cheat/activity logs table (anti-cheat monitoring)
+CREATE TABLE cheat_logs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+    event_type VARCHAR(50) NOT NULL,
+    details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
+CREATE INDEX idx_cheat_logs_team_id ON cheat_logs(team_id);
+CREATE INDEX idx_cheat_logs_created_at ON cheat_logs(created_at DESC);
 CREATE INDEX idx_teams_team_id ON teams(team_id);
 CREATE INDEX idx_questions_category ON questions(category);
 CREATE INDEX idx_team_questions_team_id ON team_questions(team_id);

@@ -1,20 +1,21 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/store';
-import { useEffect } from 'react';
 
 export default function HomePage() {
   const navigate = useNavigate();
-  const { isAuthenticated, role } = useAuthStore();
-  
-  useEffect(() => {
-    if (isAuthenticated) {
-      if (role === 'admin') {
-        navigate('/admin/dashboard');
-      } else {
-        navigate('/quiz');
-      }
+  const { isAuthenticated, role, user, logout } = useAuthStore();
+
+  const handleLogout = () => {
+    logout();
+  };
+
+  const handleContinue = () => {
+    if (role === 'admin') {
+      navigate('/admin/dashboard');
+    } else {
+      navigate('/quiz');
     }
-  }, [isAuthenticated, role, navigate]);
+  };
 
   return (
     <div className="min-h-screen bg-surface-dim">
@@ -31,7 +32,34 @@ export default function HomePage() {
             <div className="mt-4 h-px w-48 mx-auto bg-gradient-to-r from-transparent via-primary/30 to-transparent"></div>
           </div>
 
-          {/* Cards */}
+          {/* Logged-in Banner */}
+          {isAuthenticated && (
+            <div className="mb-8 animate-slide-up">
+              <div className="surface-1 rounded-3xl p-6 shadow-elevated-2 border border-primary/15">
+                <p className="text-on-surface-variant text-sm mb-1">Logged in as</p>
+                <p className="text-lg font-bold text-primary mb-4">
+                  {role === 'admin' ? 'Admin' : user?.team_name || user?.team_id || 'Team'}
+                </p>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={handleContinue}
+                    className="btn-primary px-8 py-3 rounded-2xl font-semibold"
+                  >
+                    {role === 'admin' ? 'Go to Dashboard' : 'Continue to Quiz'} →
+                  </button>
+                  <button
+                    onClick={handleLogout}
+                    className="px-8 py-3 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-error border border-outline-variant hover:border-error/30 transition-all duration-200"
+                  >
+                    Logout
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Cards - show login options only when not logged in */}
+          {!isAuthenticated && (
           <div className="grid md:grid-cols-2 gap-6 mb-12">
             <div className="surface-1 rounded-3xl p-8 shadow-elevated-2 hover:shadow-elevated-3 hover:-translate-y-1 transition-all duration-300">
               <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto mb-5 bg-primary-container border border-primary/20">
@@ -69,6 +97,7 @@ export default function HomePage() {
               </button>
             </div>
           </div>
+          )}
 
           {/* Features */}
           <div className="surface-1 rounded-3xl p-8 shadow-elevated-1">

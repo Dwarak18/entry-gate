@@ -95,11 +95,8 @@ async function assignQuestionsToTeam(teamId) {
       sectionParams
     );
 
-    // Record quiz start time (server-side timer)
-    await client.query(
-      'UPDATE teams SET quiz_started_at = CURRENT_TIMESTAMP WHERE id = $1',
-      [teamId]
-    );
+    // NOTE: quiz_started_at is set when user explicitly clicks "Start Quiz"
+    // via POST /submissions/start — not here during question assignment
 
     await client.query('COMMIT');
     console.log(`✅ Assigned ${orderedQuestions.length} questions to team ${teamId} (sectioned)`);

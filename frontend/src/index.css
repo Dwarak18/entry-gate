@@ -117,17 +117,37 @@ body {
 }
 
 /* ===== TIMER ===== */
+.timer-normal {
+  color: #00cfff;
+}
+
+.timer-amber {
+  color: #ffb300 !important;
+  text-shadow: 0 0 8px rgba(255, 179, 0, 0.3);
+}
+
 .timer-warning {
   color: #ff3d71 !important;
+  text-shadow: 0 0 10px rgba(255, 61, 113, 0.4);
 }
 
 .timer-critical {
-  animation: timer-pulse 1.5s ease-in-out infinite;
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+.timer-danger {
+  animation: timer-pulse-strong 0.6s ease-in-out infinite;
+  text-shadow: 0 0 16px rgba(255, 61, 113, 0.6);
 }
 
 @keyframes timer-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes timer-pulse-strong {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.05); }
 }
 
 /* ===== RANK BADGES ===== */
@@ -162,4 +182,38 @@ body {
 .option-selected {
   background: rgba(0, 207, 255, 0.1);
   border-color: #00cfff !important;
+}
+
+/* ===== SUBMIT MODAL BACKDROP ===== */
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+/* ===== GRID LOCKED (completed section questions) ===== */
+.grid-locked {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.2);
+  cursor: not-allowed;
+}
+
+/* ===== CHEAT BADGE ===== */
+.cheat-badge-high {
+  background: rgba(255, 61, 113, 0.12);
+  border: 1px solid rgba(255, 61, 113, 0.3);
+  color: #ff3d71;
+}
+
+.cheat-badge-medium {
+  background: rgba(255, 179, 0, 0.12);
+  border: 1px solid rgba(255, 179, 0, 0.3);
+  color: #ffb300;
+}
+
+.cheat-badge-low {
+  background: rgba(0, 255, 157, 0.08);
+  border: 1px solid rgba(0, 255, 157, 0.2);
+  color: #00ff9d;
 }

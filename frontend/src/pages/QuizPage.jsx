@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore, useQuizStore } from '../store/store';
 import { questionsAPI, submissionsAPI } from '../services/api';
 
 const SECTION_ORDER = ['C', 'Python', 'Java', 'SQL'];
 const SECTION_LABELS = { C: 'Section 1: C', Python: 'Section 2: Python', Java: 'Section 3: Java', SQL: 'Section 4: SQL' };
+const SECTION_TOTALS = { C: 12, Python: 12, Java: 13, SQL: 13 };
 
 export default function QuizPage() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const {
     questions,
     currentQuestion,
@@ -26,10 +27,17 @@ export default function QuizPage() {
   } = useQuizStore();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [completingSection, setCompletingSection] = useState(false);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
   const [hasStarted, setHasStarted] = useState(false);
+  const [expired, setExpired] = useState(false);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+
+  // Anti-cheat refs
+  const lastLogTimeRef = useRef(0);
+  const cheatCountRef = useRef({ TAB_SWITCH: 0, WINDOW_BLUR: 0, DEVTOOLS_OPEN: 0, FULLSCREEN_EXIT: 0 });
 
   // Group questions by section
   const sectionQuestions = useMemo(() => {
@@ -74,6 +82,82 @@ export default function QuizPage() {
     return questions.filter(q => answers[q.id] || q.selected_answer).length;
   }, [questions, answers]);
 
+  // Section-wise answered counts (for modal)
+  const sectionAnsweredCounts = useMemo(() => {
+    const counts = {};
+    for (const s of SECTION_ORDER) {
+      const qs = sectionQuestions[s] || [];
+      counts[s] = qs.filter(q => answers[q.id] || q.selected_answer).length;
+    }
+    return counts;
+  }, [sectionQuestions, answers, questions]);
+
+  // Timer class helper
+  const timerClass = useMemo(() => {
+    if (timeRemaining <= 60) return 'timer-warning timer-danger';
+    if (timeRemaining <= 300) return 'timer-warning timer-critical';
+    if (timeRemaining <= 600) return 'timer-amber';
+    return 'timer-normal';
+  }, [timeRemaining]);
+
+  // ===== ANTI-CHEAT: Throttled activity logger =====
+  const logActivity = useCallback(async (eventType, details = null) => {
+    const now = Date.now();
+    if (now - lastLogTimeRef.current < 5000) return;
+    lastLogTimeRef.current = now;
+    cheatCountRef.current[eventType] = (cheatCountRef.current[eventType] || 0) + 1;
+    try {
+      await submissionsAPI.logActivity({ event_type: eventType, details });
+    } catch (e) {
+      // Silently fail
+    }
+  }, []);
+
+  // ===== ANTI-CHEAT: Monitoring listeners =====
+  useEffect(() => {
+    if (!hasStarted) return;
+
+    const handleWindowBlur = () => {
+      logActivity('WINDOW_BLUR', 'Window lost focus');
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        logActivity('TAB_SWITCH', 'Page became hidden');
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        logActivity('FULLSCREEN_EXIT', 'Exited fullscreen mode');
+      }
+    };
+
+    let devtoolsOpen = false;
+    const checkDevTools = () => {
+      const widthThreshold = window.outerWidth - window.innerWidth > 160;
+      const heightThreshold = window.outerHeight - window.innerHeight > 160;
+      if ((widthThreshold || heightThreshold) && !devtoolsOpen) {
+        devtoolsOpen = true;
+        logActivity('DEVTOOLS_OPEN', 'Width diff: ' + (window.outerWidth - window.innerWidth) + ', Height diff: ' + (window.outerHeight - window.innerHeight));
+      } else if (!widthThreshold && !heightThreshold) {
+        devtoolsOpen = false;
+      }
+    };
+
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    const devtoolsInterval = setInterval(checkDevTools, 2000);
+
+    return () => {
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      clearInterval(devtoolsInterval);
+    };
+  }, [hasStarted, logActivity]);
+
   // Fetch questions on mount
   useEffect(() => {
     const fetchQuestions = async () => {
@@ -96,7 +180,18 @@ export default function QuizPage() {
           setTimeRemaining(response.data.serverTimeRemaining);
         }
 
-        // Set currentQuestion to first question of the active section
+        // Check if quiz was already started (quiz_started_at exists)
+        if (response.data.quizStartedAt) {
+          // Quiz was previously started — check if expired
+          if (response.data.serverTimeRemaining <= 0) {
+            setExpired(true);
+          } else {
+            // Timer is still running — skip pre-start screen
+            setHasStarted(true);
+          }
+        }
+        // If quizStartedAt is null, show pre-start screen (hasStarted stays false)
+
         if (response.data.sections) {
           const activeSection = SECTION_ORDER.find(name => {
             const s = response.data.sections.find(sec => sec.name === name);
@@ -115,7 +210,9 @@ export default function QuizPage() {
         setLoading(false);
       } catch (error) {
         console.error('Error fetching questions:', error);
-        alert('Failed to load questions');
+        const msg = error.response?.data?.error || error.message || 'Failed to load questions';
+        setLoadError(msg);
+        setLoading(false);
       }
     };
 
@@ -185,17 +282,16 @@ export default function QuizPage() {
     const section = currentSection;
     if (!section) return;
 
-    // Count answered using both local answers and server-saved answers
     const answered = currentSectionQs.filter(q => answers[q.id] || q.selected_answer).length;
     const total = currentSectionQs.length;
     
     if (answered < total) {
-      alert(`Please answer all ${total} questions in ${section} before completing this section. (${answered}/${total} answered)`);
+      alert('Please answer all ' + total + ' questions in ' + section + ' before completing this section. (' + answered + '/' + total + ' answered)');
       return;
     }
 
     const userConfirmed = window.confirm(
-      `Complete the ${section} section? Your answers will be locked and you'll move to the next section.`
+      'Complete the ' + section + ' section? Your answers will be locked and you will move to the next section.'
     );
     if (!userConfirmed) return;
 
@@ -204,7 +300,6 @@ export default function QuizPage() {
       const response = await submissionsAPI.completeSection({ section_name: section });
       completeSectionInStore(section);
       
-      // Calculate next section start from fresh store state
       const nextSection = response.data.next_section;
       if (nextSection) {
         const allQs = useQuizStore.getState().questions;
@@ -232,13 +327,12 @@ export default function QuizPage() {
       return;
     }
 
-    if (!force) {
-      const confirmSubmit = window.confirm(
-        'Are you sure you want to submit? You cannot change your answers after submission.'
-      );
-      if (!confirmSubmit) return;
+    if (!force && !showSubmitModal) {
+      setShowSubmitModal(true);
+      return;
     }
 
+    setShowSubmitModal(false);
     setSubmitting(true);
     try {
       const timeTaken = (60 * 60) - timeRemaining;
@@ -252,10 +346,36 @@ export default function QuizPage() {
     }
   };
 
+  const confirmSubmit = () => {
+    handleSubmit(true);
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return mins.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
+
+  const handleStartQuiz = async () => {
+    try {
+      const response = await submissionsAPI.startQuiz();
+      const { setTimeRemaining } = useQuizStore.getState();
+      setTimeRemaining(response.data.serverTimeRemaining);
+      if (response.data.serverTimeRemaining <= 0) {
+        setExpired(true);
+      } else {
+        setHasStarted(true);
+      }
+    } catch (error) {
+      console.error('Error starting quiz:', error);
+      const msg = error.response?.data?.error || 'Failed to start quiz';
+      alert(msg);
+    }
   };
 
   if (loading) {
@@ -264,6 +384,76 @@ export default function QuizPage() {
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 spinner-m3 mx-auto mb-4"></div>
           <p className="text-on-surface-variant text-sm">Loading questions...</p>
+          <button
+            onClick={handleLogout}
+            className="mt-6 px-6 py-2 rounded-xl text-xs font-medium bg-error-container text-error border border-error/20 hover:bg-error/20 transition-all duration-200"
+          >
+            Cancel &amp; Logout
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== ERROR SCREEN =====
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-surface-dim flex items-center justify-center px-4">
+        <div className="max-w-md w-full animate-slide-up">
+          <div className="surface-1 rounded-3xl p-8 shadow-elevated-3 text-center">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 bg-error-container border border-error/20">
+              <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h2 className="text-xl font-bold text-error mb-2">Failed to Load Quiz</h2>
+            <p className="text-on-surface-variant text-sm mb-6">{loadError}</p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => window.location.reload()}
+                className="flex-1 btn-primary py-3 rounded-2xl font-semibold"
+              >
+                Retry
+              </button>
+              <button
+                onClick={handleLogout}
+                className="flex-1 py-3 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-error border border-outline-variant hover:border-error/30 transition-all duration-200"
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== EXPIRED SCREEN =====
+  if (expired) {
+    return (
+      <div className="min-h-screen bg-surface-dim flex items-center justify-center px-4">
+        <div className="max-w-md w-full animate-slide-up">
+          <div className="surface-1 rounded-3xl p-8 shadow-elevated-3 text-center">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5 bg-error-container border border-error/20">
+              <svg className="w-8 h-8 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-error mb-2">Time Expired</h2>
+            <p className="text-on-surface-variant text-sm mb-6">
+              Your quiz time of 60 minutes has run out. You can no longer submit answers.
+            </p>
+            <div className="p-4 rounded-2xl bg-surface-container mb-6">
+              <p className="text-xs text-on-surface-variant">Team: <span className="font-semibold text-on-surface">{user?.team_name}</span></p>
+              <p className="text-xs text-on-surface-variant mt-1">Answered: <span className="font-semibold text-on-surface">{totalAnswered}/{questions.length}</span></p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="btn-primary w-full py-3 rounded-2xl font-semibold"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -292,7 +482,8 @@ export default function QuizPage() {
                   <li>Once a section is completed, answers are locked</li>
                   <li>Your answers are auto-saved within the active section</li>
                   <li>Final submit is available after all 4 sections are done</li>
-                  <li className="text-error font-medium">Do not refresh the page during the quiz!</li>
+                  <li className="text-error font-medium">Do not refresh the page or switch tabs during the quiz!</li>
+                  <li className="text-error font-medium">Tab switches and suspicious activity are monitored</li>
                 </ul>
               </div>
 
@@ -307,10 +498,16 @@ export default function QuizPage() {
             </div>
 
             <button
-              onClick={() => setHasStarted(true)}
+              onClick={handleStartQuiz}
               className="btn-primary w-full py-4 rounded-2xl font-semibold text-lg"
             >
               Start Quiz
+            </button>
+            <button
+              onClick={handleLogout}
+              className="w-full mt-3 py-3 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-error transition-all duration-200 text-sm"
+            >
+              ← Logout
             </button>
           </div>
         </div>
@@ -323,20 +520,90 @@ export default function QuizPage() {
 
   return (
     <div className="min-h-screen bg-surface-dim px-4 py-6">
+      {/* ===== SUBMISSION CONFIRMATION MODAL ===== */}
+      {showSubmitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onClick={() => setShowSubmitModal(false)}>
+          <div className="surface-1 rounded-3xl p-8 max-w-md w-full mx-4 shadow-elevated-3 animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-bold text-on-surface mb-4 text-center">
+              Confirm Submission
+            </h3>
+            <p className="text-on-surface-variant text-sm mb-6 text-center">
+              Are you sure you want to submit? You cannot change your answers after submission.
+            </p>
+            
+            {/* Section-wise breakdown */}
+            <div className="space-y-2 mb-6">
+              {SECTION_ORDER.map(s => {
+                const answered = sectionAnsweredCounts[s];
+                const total = SECTION_TOTALS[s];
+                const isComplete = sections.find(sec => sec.name === s)?.completed;
+                return (
+                  <div key={s} className="flex justify-between items-center p-3 rounded-xl surface-2">
+                    <span className="text-sm text-on-surface font-medium">{s}</span>
+                    <div className="flex items-center gap-2">
+                      <span className={'text-sm font-mono ' + (answered === total ? 'text-success' : 'text-warning')}>
+                        {answered}/{total}
+                      </span>
+                      {isComplete && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">Locked</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="p-3 rounded-xl bg-primary-container border border-primary/15 mb-6">
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Total Answered</span>
+                <span className="font-bold text-primary font-mono">{totalAnswered}/{questions.length}</span>
+              </div>
+              <div className="flex justify-between text-sm mt-1">
+                <span className="text-on-surface-variant">Time Remaining</span>
+                <span className={'font-bold font-mono ' + timerClass}>{formatTime(timeRemaining)}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSubmitModal(false)}
+                className="flex-1 py-3 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-on-surface transition-all duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSubmit}
+                disabled={submitting}
+                className="flex-1 btn-success py-3 rounded-2xl font-semibold disabled:opacity-50"
+              >
+                {submitting ? 'Submitting...' : 'Submit Quiz'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="max-w-4xl mx-auto mb-4">
         <div className="surface-1 p-4 rounded-2xl shadow-elevated-1 flex justify-between items-center">
-          <div>
-            <p className="font-semibold text-on-surface">{user?.team_name}</p>
-            <p className="text-xs text-on-surface-variant">
-              Total: {totalAnswered}/{questions.length} answered
-            </p>
+          <div className="flex items-center gap-3">
+            <div>
+              <p className="font-semibold text-on-surface">{user?.team_name}</p>
+              <p className="text-xs text-on-surface-variant">
+                Total: {totalAnswered}/{questions.length} answered
+              </p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-error-container text-error border border-error/20 hover:bg-error/20 transition-all duration-200"
+              title="Logout"
+            >
+              Logout
+            </button>
           </div>
           <div className="text-right">
             <p className="text-xs text-on-surface-variant">Time Remaining</p>
-            <p className={`text-2xl font-bold font-mono ${
-              timeRemaining < 300 ? 'timer-warning timer-critical' : timeRemaining < 600 ? 'timer-warning' : 'text-primary'
-            }`}>
+            <p className={'text-2xl font-bold font-mono ' + timerClass}>
               {formatTime(timeRemaining)}
             </p>
           </div>
@@ -368,17 +635,17 @@ export default function QuizPage() {
                     setCurrentQuestion(start);
                   }
                 }}
-                className={`flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 text-center border ${
+                className={'flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 text-center border ' + (
                   isCompleted
                     ? 'section-complete text-success'
                     : isActive
                     ? 'section-active text-primary'
                     : 'section-locked text-on-surface-variant/40 cursor-not-allowed'
-                }`}
+                )}
               >
                 <div>{sName}</div>
                 <div className="text-[10px] opacity-70 mt-0.5">
-                  {isCompleted ? '✓ Done' : `${answeredInSection}/${sectionQs.length}`}
+                  {isCompleted ? '✓ Done' : answeredInSection + '/' + sectionQs.length}
                 </div>
               </button>
             );
@@ -393,7 +660,7 @@ export default function QuizPage() {
             {currentSection ? SECTION_LABELS[currentSection] : 'All Sections Complete'}
           </h3>
           <span className="text-xs font-medium text-on-surface-variant font-mono">
-            {currentSection ? `${sectionAnsweredCount} / ${currentSectionQs.length} answered` : ''}
+            {currentSection ? sectionAnsweredCount + ' / ' + currentSectionQs.length + ' answered' : ''}
           </span>
         </div>
       </div>
@@ -403,14 +670,14 @@ export default function QuizPage() {
         <div className="max-w-4xl mx-auto mb-6">
           <div className="surface-1 p-6 rounded-3xl text-center border border-success/20 shadow-glow-success">
             <p className="text-base font-semibold mb-4 text-success">
-              🎉 All sections complete! You can now submit your quiz.
+              All sections complete! You can now submit your quiz.
             </p>
             <button
               onClick={() => handleSubmit(false)}
               disabled={submitting}
               className="btn-success px-10 py-4 rounded-2xl font-semibold text-lg disabled:opacity-50 disabled:hover:transform-none"
             >
-              {submitting ? 'Submitting...' : '🚀 Submit Quiz'}
+              {submitting ? 'Submitting...' : 'Submit Quiz'}
             </button>
           </div>
         </div>
@@ -442,14 +709,14 @@ export default function QuizPage() {
                   key={option}
                   onClick={() => handleAnswerSelect(option)}
                   disabled={isCurrentSectionComplete}
-                  className={`w-full p-4 rounded-2xl text-left transition-all duration-200 border disabled:opacity-50 disabled:cursor-not-allowed ${
+                  className={'w-full p-4 rounded-2xl text-left transition-all duration-200 border disabled:opacity-50 disabled:cursor-not-allowed ' + (
                     selectedAnswer === option
                       ? 'option-selected text-on-surface'
                       : 'bg-surface-container-high/50 border-outline-variant text-on-surface-variant hover:border-primary/30 hover:bg-primary-container'
-                  }`}
+                  )}
                 >
                   <span className="font-medium mr-3 text-primary">{option}.</span>
-                  {question[`option_${option.toLowerCase()}`]}
+                  {question['option_' + option.toLowerCase()]}
                 </button>
               ))}
             </div>
@@ -468,13 +735,13 @@ export default function QuizPage() {
                 <button
                   onClick={handleCompleteSection}
                   disabled={completingSection}
-                  className={`px-8 py-3 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 border ${
+                  className={'px-8 py-3 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 border ' + (
                     sectionAnsweredCount < currentSectionQs.length
                       ? 'border-outline-variant text-on-surface-variant/40 cursor-not-allowed bg-surface-container'
                       : 'btn-success'
-                  }`}
+                  )}
                 >
-                  {completingSection ? 'Completing...' : sectionAnsweredCount < currentSectionQs.length ? `Answer all (${sectionAnsweredCount}/${currentSectionQs.length})` : `Complete ${currentSection} ✓`}
+                  {completingSection ? 'Completing...' : sectionAnsweredCount < currentSectionQs.length ? 'Answer all (' + sectionAnsweredCount + '/' + currentSectionQs.length + ')' : 'Complete ' + currentSection + ' ✓'}
                 </button>
               ) : (
                 <button
@@ -499,13 +766,13 @@ export default function QuizPage() {
                   <button
                     key={idx}
                     onClick={() => setCurrentQuestion(globalIdx)}
-                    className={`aspect-square rounded-xl text-xs font-medium transition-all duration-200 border ${
+                    className={'aspect-square rounded-xl text-xs font-medium transition-all duration-200 border ' + (
                       globalIdx === currentQuestion
                         ? 'bg-primary/20 text-primary border-primary/40'
                         : answers[q.id] || q.selected_answer
                         ? 'bg-success/10 text-success border-success/30'
                         : 'bg-surface-container border-outline-variant text-on-surface-variant/50 hover:border-primary/20'
-                    }`}
+                    )}
                   >
                     {idx + 1}
                   </button>
@@ -513,6 +780,28 @@ export default function QuizPage() {
               })}
             </div>
           </div>
+
+          {/* Completed sections grids (locked) */}
+          {sections.filter(s => s.completed && s.name !== currentSection).map(sec => {
+            const secQs = sectionQuestions[sec.name] || [];
+            return (
+              <div key={sec.name} className="mt-3 p-4 rounded-2xl surface-1 shadow-elevated-1 opacity-60">
+                <h4 className="text-xs font-medium mb-2 text-on-surface-variant flex items-center gap-2">
+                  {sec.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">✓ Locked</span>
+                </h4>
+                <div className="grid grid-cols-13 gap-1.5">
+                  {secQs.map((q, idx) => (
+                    <div
+                      key={idx}
+                      className="aspect-square rounded-lg text-[10px] font-medium flex items-center justify-center grid-locked"
+                    >
+                      {idx + 1}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

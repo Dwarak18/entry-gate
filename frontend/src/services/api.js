@@ -27,7 +27,8 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 || 
+        (error.response?.status === 403 && error.response?.data?.error?.includes('token'))) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
@@ -55,6 +56,8 @@ export const submissionsAPI = {
   completeSection: (data) => api.post('/submissions/complete-section', data),
   submitQuiz: (data) => api.post('/submissions/submit', data),
   getStatus: () => api.get('/submissions/status'),
+  logActivity: (data) => api.post('/submissions/log-activity', data),
+  startQuiz: () => api.post('/submissions/start'),
 };
 
 // Admin APIs
@@ -74,6 +77,8 @@ export const adminAPI = {
     });
   },
   deleteTeam: (teamId) => api.delete(`/admin/teams/${teamId}`),
+  resetTeam: (teamId) => api.post(`/admin/reset-team/${teamId}`),
+  getCheatLogs: () => api.get('/admin/cheat-logs'),
 };
 
 export default api;
