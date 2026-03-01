@@ -310,6 +310,7 @@ export default function QuizPage() {
     if (completingSection) return;
     const section = currentSection;
     if (!section) return;
+
     setShowSectionConfirm(false);
     setCompletingSection(true);
     try {
@@ -539,10 +540,11 @@ export default function QuizPage() {
           <div className="surface-1 rounded-3xl p-6 max-w-sm w-full mx-4 shadow-elevated-3 animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="text-lg font-bold text-on-surface mb-2 text-center">Complete {currentSection} Section?</h3>
             <p className="text-on-surface-variant text-sm mb-4 text-center">
-              Your answers will be locked. You answered <span className="font-bold text-on-surface">{sectionAnsweredCount}/{currentSectionQs.length}</span> questions.
-              {sectionAnsweredCount < currentSectionQs.length && (
-                <span className="block mt-1 text-warning text-xs">{currentSectionQs.length - sectionAnsweredCount} unanswered question{currentSectionQs.length - sectionAnsweredCount > 1 ? 's' : ''} will be left blank.</span>
-              )}
+              Your answers will be locked.
+              {sectionAnsweredCount < currentSectionQs.length
+                ? <span> You answered <span className="font-bold text-warning">{sectionAnsweredCount}/{currentSectionQs.length}</span> — <span className="text-warning">{currentSectionQs.length - sectionAnsweredCount} will be left blank.</span></span>
+                : <span> All <span className="font-bold text-success">{currentSectionQs.length}</span> questions answered.</span>
+              }
             </p>
             <div className="flex gap-3">
               <button onClick={() => setShowSectionConfirm(false)} className="flex-1 py-2.5 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-on-surface transition-all">Cancel</button>
@@ -803,7 +805,7 @@ export default function QuizPage() {
                       disabled={completingSection}
                       className="px-7 py-2.5 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 btn-success"
                     >
-                      {completingSection ? 'Completing...' : 'Complete ' + currentSection + ' →'}
+                      {completingSection ? 'Completing...' : 'Complete ' + currentSection + ' → (' + sectionAnsweredCount + '/' + currentSectionQs.length + ')'}
                     </button>
                   ) : (
                     <button
