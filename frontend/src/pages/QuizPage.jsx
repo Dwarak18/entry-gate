@@ -33,6 +33,14 @@ export default function QuizPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [expired, setExpired] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [toast, setToast] = useState(null); // { msg, type: 'error'|'info' }
+  const toastTimerRef = useRef(null);
+
+  const showToast = (msg, type = 'error') => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ msg, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000);
+  };
 
   // Anti-cheat refs
   const lastLogTimeRef = useRef(0);
@@ -228,7 +236,7 @@ export default function QuizPage() {
           localStorage.removeItem('user');
           navigate('/login');
         } else {
-          alert('Failed to load quiz. Please refresh.');
+          showToast('Failed to load quiz. Please refresh.');
         }
       }
     };
@@ -275,7 +283,7 @@ export default function QuizPage() {
     } catch (error) {
       console.error('Error saving answer:', error);
       if (error.response?.data?.error) {
-        alert(error.response.data.error);
+        showToast(error.response.data.error);
       }
     }
   };
@@ -303,7 +311,7 @@ export default function QuizPage() {
     const total = currentSectionQs.length;
     
     if (answered < total) {
-      alert('Please answer all ' + total + ' questions in ' + section + ' before completing this section. (' + answered + '/' + total + ' answered)');
+      showToast('Please answer all ' + total + ' questions in ' + section + ' before completing this section. (' + answered + '/' + total + ' answered)');
       return;
     }
 
@@ -330,7 +338,7 @@ export default function QuizPage() {
     } catch (error) {
       console.error('Error completing section:', error);
       const msg = error.response?.data?.error || 'Failed to complete section';
-      alert(msg);
+      showToast(msg);
     } finally {
       setCompletingSection(false);
     }
@@ -340,7 +348,7 @@ export default function QuizPage() {
     if (submitting) return;
     
     if (!force && !allSectionsComplete) {
-      alert('Complete all 4 sections before submitting.');
+      showToast('Complete all 4 sections before submitting.');
       return;
     }
 
@@ -358,7 +366,7 @@ export default function QuizPage() {
       navigate('/result');
     } catch (error) {
       console.error('Error submitting quiz:', error);
-      alert(error.response?.data?.error || 'Failed to submit quiz. Please try again.');
+      showToast(error.response?.data?.error || 'Failed to submit quiz. Please try again.');
       setSubmitting(false);
     }
   };
@@ -395,7 +403,7 @@ export default function QuizPage() {
     } catch (error) {
       console.error('Error starting quiz:', error);
       const msg = error.response?.data?.error || 'Failed to start quiz';
-      alert(msg);
+      showToast(msg);
       setLoading(false);
     }
   };
@@ -503,7 +511,29 @@ export default function QuizPage() {
 
   return (
     <div className="min-h-screen bg-surface-dim px-4 py-6">
-      {/* ===== SUBMISSION CONFIRMATION MODAL ===== */}
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className={'fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex items-start gap-3 px-5 py-4 rounded-2xl shadow-elevated-3 max-w-sm w-full mx-4 animate-slide-up ' + (
+            toast.type === 'error'
+              ? 'bg-error-container border border-error/30 text-error'
+              : 'bg-primary-container border border-primary/30 text-primary'
+          )}
+        >
+          <svg className="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {toast.type === 'error'
+              ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 100 20A10 10 0 0012 2z" />
+            }
+          </svg>
+          <p className="text-sm font-medium flex-1">{toast.msg}</p>
+          <button onClick={() => setToast(null)} className="shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )} */}
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onClick={() => setShowSubmitModal(false)}>
           <div className="surface-1 rounded-3xl p-8 max-w-md w-full mx-4 shadow-elevated-3 animate-slide-up" onClick={e => e.stopPropagation()}>
