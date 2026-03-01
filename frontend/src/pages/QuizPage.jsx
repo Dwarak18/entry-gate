@@ -33,6 +33,7 @@ export default function QuizPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [expired, setExpired] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showSectionConfirm, setShowSectionConfirm] = useState(false);
   const [questionFlags, setQuestionFlags] = useState({}); // { [questionId]: 'review' }
   const [toast, setToast] = useState(null); // { msg, type: 'error'|'info' }
   const toastTimerRef = useRef(null);
@@ -307,23 +308,9 @@ export default function QuizPage() {
 
   const handleCompleteSection = async () => {
     if (completingSection) return;
-    
     const section = currentSection;
     if (!section) return;
-
-    const answered = currentSectionQs.filter(q => answers[q.id] || q.selected_answer).length;
-    const total = currentSectionQs.length;
-    
-    if (answered < total) {
-      showToast('Please answer all ' + total + ' questions in ' + section + ' before completing this section. (' + answered + '/' + total + ' answered)');
-      return;
-    }
-
-    const userConfirmed = window.confirm(
-      'Complete the ' + section + ' section? Your answers will be locked and you will move to the next section.'
-    );
-    if (!userConfirmed) return;
-
+    setShowSectionConfirm(false);
     setCompletingSection(true);
     try {
       const response = await submissionsAPI.completeSection({ section_name: section });
@@ -545,6 +532,25 @@ export default function QuizPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
+        </div>
+      )}
+      {showSectionConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onClick={() => setShowSectionConfirm(false)}>
+          <div className="surface-1 rounded-3xl p-6 max-w-sm w-full mx-4 shadow-elevated-3 animate-slide-up" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-on-surface mb-2 text-center">Complete {currentSection} Section?</h3>
+            <p className="text-on-surface-variant text-sm mb-4 text-center">
+              Your answers will be locked. You answered <span className="font-bold text-on-surface">{sectionAnsweredCount}/{currentSectionQs.length}</span> questions.
+              {sectionAnsweredCount < currentSectionQs.length && (
+                <span className="block mt-1 text-warning text-xs">{currentSectionQs.length - sectionAnsweredCount} unanswered question{currentSectionQs.length - sectionAnsweredCount > 1 ? 's' : ''} will be left blank.</span>
+              )}
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowSectionConfirm(false)} className="flex-1 py-2.5 rounded-2xl font-medium surface-2 text-on-surface-variant hover:text-on-surface transition-all">Cancel</button>
+              <button onClick={handleCompleteSection} disabled={completingSection} className="flex-1 btn-success py-2.5 rounded-2xl font-semibold disabled:opacity-50">
+                {completingSection ? 'Completing...' : 'Lock & Continue →'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {showSubmitModal && (
@@ -793,15 +799,11 @@ export default function QuizPage() {
 
                   {localIndex === currentSectionQs.length - 1 ? (
                     <button
-                      onClick={handleCompleteSection}
-                      disabled={completingSection || sectionAnsweredCount < currentSectionQs.length}
-                      className={'px-7 py-2.5 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 border ' + (
-                        sectionAnsweredCount < currentSectionQs.length
-                          ? 'border-outline-variant text-on-surface-variant/40 cursor-not-allowed bg-surface-container'
-                          : 'btn-success'
-                      )}
+                      onClick={() => setShowSectionConfirm(true)}
+                      disabled={completingSection}
+                      className="px-7 py-2.5 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 btn-success"
                     >
-                      {completingSection ? 'Completing...' : sectionAnsweredCount < currentSectionQs.length ? 'Answer all (' + sectionAnsweredCount + '/' + currentSectionQs.length + ')' : 'Complete ' + currentSection + ' ✓'}
+                      {completingSection ? 'Completing...' : 'Complete ' + currentSection + ' →'}
                     </button>
                   ) : (
                     <button
@@ -855,27 +857,16 @@ export default function QuizPage() {
                 </div>
               </div>
 
-              {/* Completed sections grids (locked) */}
-              {sections.filter(s => s.completed && s.name !== currentSection).map(sec => {
-                const secQs = sectionQuestions[sec.name] || [];
-                return (
-                  <div key={sec.name} className="p-3.5 rounded-2xl surface-1 shadow-elevated-1 opacity-60">
-                    <h4 className="text-xs font-medium mb-2 text-on-surface-variant flex items-center gap-2">
-                      {sec.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">✓ Locked</span>
-                    </h4>
-                    <div className="grid grid-cols-13 gap-1.5">
-                      {secQs.map((q, idx) => (
-                        <div
-                          key={idx}
-                          className="aspect-square rounded-lg text-[10px] font-medium flex items-center justify-center grid-locked"
-                        >
-                          {idx + 1}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+              {/* Completed sections — compact badges only */}
+              {sections.filter(s => s.completed && s.name !== currentSection).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {sections.filter(s => s.completed && s.name !== currentSection).map(sec => (
+                    <span key={sec.name} className="text-xs px-3 py-1.5 rounded-xl bg-success/10 text-success border border-success/20 font-medium">
+                      {sec.name} ✓ Locked — {(sectionQuestions[sec.name] || []).filter(q => answers[q.id] || q.selected_answer).length}/{(sectionQuestions[sec.name] || []).length} answered
+                    </span>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
