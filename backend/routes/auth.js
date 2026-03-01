@@ -60,22 +60,33 @@ router.post('/admin/login', loginLimiter, validateAdminLogin, async (req, res) =
   try {
     const { username, password } = req.body;
 
-    // Simple admin check (in production, store this in database)
-    if (username !== process.env.ADMIN_USERNAME || 
-        password !== process.env.ADMIN_PASSWORD) {
+    // Check admin credentials from database
+    const result = await pool.query(
+      'SELECT * FROM admins WHERE username = $1',
+      [username]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Invalid admin credentials' });
+    }
+
+    const admin = result.rows[0];
+    const validPassword = await bcrypt.compare(password, admin.password_hash);
+
+    if (!validPassword) {
       return res.status(401).json({ error: 'Invalid admin credentials' });
     }
 
     // Generate JWT token
     const token = generateToken({
-      username,
+      username: admin.username,
       role: 'admin'
     });
 
     res.json({
       message: 'Admin login successful',
       token,
-      admin: { username }
+      admin: { username: admin.username }
     });
 
   } catch (error) {

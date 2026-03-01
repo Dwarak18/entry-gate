@@ -63,9 +63,12 @@ export const submissionsAPI = {
 export const adminAPI = {
   uploadTeams: (formData) => {
     return api.post('/admin/upload-teams', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  uploadTeamsJSON: (formData) => {
+    return api.post('/admin/upload-teams-json', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
   getTeams: () => api.get('/admin/teams'),

@@ -15,6 +15,7 @@ export default function AdminDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadFormat, setUploadFormat] = useState('excel');
   const refreshIntervalRef = useRef(null);
 
   useEffect(() => {
@@ -99,7 +100,12 @@ export default function AdminDashboard() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
-      const response = await adminAPI.uploadTeams(formData);
+      let response;
+      if (uploadFormat === 'json') {
+        response = await adminAPI.uploadTeamsJSON(formData);
+      } else {
+        response = await adminAPI.uploadTeams(formData);
+      }
       setUploadResult(response.data);
       setSelectedFile(null);
       
@@ -265,41 +271,72 @@ export default function AdminDashboard() {
         {activeTab === 'upload' && (
           <div className="surface-1 rounded-3xl shadow-elevated-2 p-6 animate-fade-in">
             <h2 className="text-xl font-semibold mb-4 text-on-surface">
-              Upload Teams from Excel
+              Upload Teams
             </h2>
-            
-            <div className="mb-6 p-4 rounded-2xl surface-2">
-              <h3 className="font-medium mb-2 text-primary text-sm">
-                Excel Format Required:
-              </h3>
-              <table className="w-full text-sm text-on-surface-variant">
-                <thead>
-                  <tr className="border-b border-outline-variant">
-                    <th className="p-2 text-left text-xs">Team ID</th>
-                    <th className="p-2 text-left text-xs">Team Name</th>
-                    <th className="p-2 text-left text-xs">Password</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="p-2 font-mono text-xs">TEAM001</td>
-                    <td className="p-2 text-xs">Alpha Team</td>
-                    <td className="p-2 font-mono text-xs">alpha123</td>
-                  </tr>
-                  <tr>
-                    <td className="p-2 font-mono text-xs">TEAM002</td>
-                    <td className="p-2 text-xs">Beta Team</td>
-                    <td className="p-2 font-mono text-xs">beta456</td>
-                  </tr>
-                </tbody>
-              </table>
+
+            {/* Format selector */}
+            <div className="flex gap-2 mb-5">
+              {['excel', 'csv', 'json'].map(fmt => (
+                <button
+                  key={fmt}
+                  onClick={() => { setUploadFormat(fmt); setSelectedFile(null); setUploadResult(null); const fi = document.getElementById('file-upload'); if (fi) fi.value = ''; }}
+                  className={'flex-1 py-2 rounded-xl text-sm font-medium border transition-all ' + (
+                    uploadFormat === fmt
+                      ? 'bg-secondary-container border-secondary/30 text-secondary'
+                      : 'surface-2 border-outline-variant text-on-surface-variant hover:bg-surface-bright'
+                  )}
+                >
+                  {fmt.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            {/* Format examples */}
+            <div className="mb-5 p-4 rounded-2xl surface-2">
+              {uploadFormat === 'excel' && (
+                <>
+                  <h3 className="font-medium mb-2 text-primary text-sm">Excel columns required:</h3>
+                  <table className="w-full text-sm text-on-surface-variant">
+                    <thead><tr className="border-b border-outline-variant">
+                      <th className="p-2 text-left text-xs">Team ID</th>
+                      <th className="p-2 text-left text-xs">Team Name</th>
+                      <th className="p-2 text-left text-xs">Password</th>
+                    </tr></thead>
+                    <tbody>
+                      <tr><td className="p-2 font-mono text-xs">TEAM001</td><td className="p-2 text-xs">Alpha Team</td><td className="p-2 font-mono text-xs">alpha123</td></tr>
+                      <tr><td className="p-2 font-mono text-xs">TEAM002</td><td className="p-2 text-xs">Beta Team</td><td className="p-2 font-mono text-xs">beta456</td></tr>
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {uploadFormat === 'csv' && (
+                <>
+                  <h3 className="font-medium mb-2 text-primary text-sm">CSV format (.csv):</h3>
+                  <pre className="font-mono text-xs text-on-surface-variant bg-surface-dim p-3 rounded-xl overflow-x-auto">
+{`team_id,team_name,password
+TEAM001,Alpha Team,alpha123
+TEAM002,Beta Team,beta456`}
+                  </pre>
+                </>
+              )}
+              {uploadFormat === 'json' && (
+                <>
+                  <h3 className="font-medium mb-2 text-primary text-sm">JSON format (.json):</h3>
+                  <pre className="font-mono text-xs text-on-surface-variant bg-surface-dim p-3 rounded-xl overflow-x-auto">
+{`[
+  { "team_id": "TEAM001", "team_name": "Alpha Team", "password": "alpha123" },
+  { "team_id": "TEAM002", "team_name": "Beta Team", "password": "beta456" }
+]`}
+                  </pre>
+                </>
+              )}
             </div>
 
             <div className="mb-4">
               <input
                 id="file-upload"
                 type="file"
-                accept=".xlsx,.xls"
+                accept={uploadFormat === 'excel' ? '.xlsx,.xls' : uploadFormat === 'csv' ? '.csv' : '.json'}
                 onChange={handleFileSelect}
                 className="w-full p-3 rounded-2xl input-m3 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border file:border-secondary/30 file:bg-secondary-container file:text-secondary file:font-medium file:text-sm file:cursor-pointer"
               />
@@ -310,7 +347,7 @@ export default function AdminDashboard() {
               disabled={!selectedFile || uploading}
               className="btn-secondary w-full py-3 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none"
             >
-              {uploading ? 'Uploading...' : 'Upload Teams'}
+              {uploading ? 'Uploading...' : `Upload Teams (${uploadFormat.toUpperCase()})`}
             </button>
 
             {uploadResult && (
@@ -319,25 +356,15 @@ export default function AdminDashboard() {
                   ? 'surface-2 border border-success/20'
                   : 'surface-2 border border-warning/20'
               )}>
-                <h4 className="font-semibold mb-2 text-on-surface text-sm">
-                  Upload Results:
-                </h4>
-                <p className="text-on-surface-variant text-sm">
-                  Created: {uploadResult.created} teams
-                </p>
-                <p className="text-on-surface-variant text-sm">
-                  Skipped: {uploadResult.skipped} teams
-                </p>
+                <h4 className="font-semibold mb-2 text-on-surface text-sm">Upload Results:</h4>
+                <p className="text-on-surface-variant text-sm">Created: {uploadResult.created} teams</p>
+                <p className="text-on-surface-variant text-sm">Skipped: {uploadResult.skipped} teams</p>
                 {uploadResult.errors && uploadResult.errors.length > 0 && (
                   <details className="mt-2">
-                    <summary className="cursor-pointer text-error text-sm">
-                      View Errors ({uploadResult.errors.length})
-                    </summary>
+                    <summary className="cursor-pointer text-error text-sm">View Errors ({uploadResult.errors.length})</summary>
                     <ul className="mt-2 ml-4 text-sm list-disc">
                       {uploadResult.errors.map((error, idx) => (
-                        <li key={idx} className="text-error/80">
-                          {error}
-                        </li>
+                        <li key={idx} className="text-error/80">{error}</li>
                       ))}
                     </ul>
                   </details>

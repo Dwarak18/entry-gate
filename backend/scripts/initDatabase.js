@@ -2,6 +2,7 @@ import pool from '../config/database.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import bcrypt from 'bcrypt';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,19 @@ async function initDatabase() {
     await client.query(schema);
     
     console.log('✅ Database schema created successfully!');
+
+    // Seed default admin if none exists
+    const adminCheck = await client.query('SELECT COUNT(*) FROM admins');
+    if (parseInt(adminCheck.rows[0].count) === 0) {
+      const passwordHash = await bcrypt.hash('heisenberg', 10);
+      await client.query(
+        'INSERT INTO admins (username, password_hash) VALUES ($1, $2)',
+        ['admin', passwordHash]
+      );
+      console.log('✅ Default admin created: username=admin, password=heisenberg');
+    } else {
+      console.log('ℹ️  Admin already exists, skipping seed.');
+    }
     
   } catch (error) {
     console.error('❌ Error initializing database:', error);

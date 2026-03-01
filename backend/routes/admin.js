@@ -7,6 +7,19 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
+// Parse CSV text into array of objects
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
+  return lines.slice(1).map(line => {
+    const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = values[i] || ''; });
+    return obj;
+  });
+}
+
 const router = express.Router();
 
 // Sanitize cell value — strip formula injection chars and trim
@@ -38,15 +51,63 @@ const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (ext !== '.xlsx' && ext !== '.xls') {
-      return cb(new Error('Only Excel files are allowed'));
+    if (!['.xlsx', '.xls', '.csv'].includes(ext)) {
+      return cb(new Error('Only Excel (.xlsx/.xls) or CSV files are allowed'));
     }
     cb(null, true);
   },
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
 });
 
-// Upload teams from Excel
+const uploadJSON = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (ext !== '.json') return cb(new Error('Only JSON files are allowed'));
+    cb(null, true);
+  },
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
+
+// Shared helper to insert teams from an array of row objects
+async function insertTeams(client, data) {
+  let created = 0, skipped = 0;
+  const errors = [];
+
+  for (const row of data) {
+    try {
+      const teamId = sanitizeCell(row['Team ID'] || row['team_id']);
+      const teamName = sanitizeCell(row['Team Name'] || row['team_name']);
+      const password = row['Password'] || row['password'];
+
+      if (!teamId || !teamName || !password) {
+        errors.push(`Row ${created + skipped + 1}: Missing required fields (team_id, team_name, password)`);
+        skipped++; continue;
+      }
+      if (teamId.length > 50) { errors.push(`Row ${created + skipped + 1}: Team ID exceeds 50 characters`); skipped++; continue; }
+      if (teamName.length > 255) { errors.push(`Row ${created + skipped + 1}: Team Name exceeds 255 characters`); skipped++; continue; }
+
+      const existingTeam = await client.query('SELECT id FROM teams WHERE team_id = $1', [teamId]);
+      if (existingTeam.rows.length > 0) {
+        errors.push(`Team ID "${teamId}" already exists`);
+        skipped++; continue;
+      }
+
+      const hashedPassword = await bcrypt.hash(String(password), 10);
+      await client.query(
+        'INSERT INTO teams (team_id, team_name, password_hash) VALUES ($1, $2, $3)',
+        [teamId, teamName, hashedPassword]
+      );
+      created++;
+    } catch (error) {
+      errors.push(`Row ${created + skipped + 1}: ${error.message}`);
+      skipped++;
+    }
+  }
+  return { created, skipped, errors };
+}
+
+// Upload teams from Excel or CSV
 router.post('/upload-teams', authenticateAdmin, upload.single('file'), async (req, res) => {
   const client = await pool.connect();
   
@@ -55,102 +116,84 @@ router.post('/upload-teams', authenticateAdmin, upload.single('file'), async (re
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Read Excel file
-    const workbook = xlsx.readFile(req.file.path);
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet);
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    let data;
+
+    if (ext === '.csv') {
+      const text = fs.readFileSync(req.file.path, 'utf8');
+      data = parseCSV(text);
+    } else {
+      // Excel
+      const workbook = xlsx.readFile(req.file.path);
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      data = xlsx.utils.sheet_to_json(sheet);
+    }
 
     if (data.length === 0) {
-      return res.status(400).json({ error: 'Excel file is empty' });
+      return res.status(400).json({ error: 'File is empty' });
     }
 
     if (data.length > 500) {
-      return res.status(400).json({ error: 'Excel file exceeds maximum of 500 teams per upload' });
+      return res.status(400).json({ error: 'File exceeds maximum of 500 teams per upload' });
     }
 
     await client.query('BEGIN');
-
-    let created = 0;
-    let skipped = 0;
-    const errors = [];
-
-    for (const row of data) {
-      try {
-        const teamId = sanitizeCell(row['Team ID'] || row['team_id']);
-        const teamName = sanitizeCell(row['Team Name'] || row['team_name']);
-        const password = row['Password'] || row['password'];
-
-        if (!teamId || !teamName || !password) {
-          errors.push(`Row ${created + skipped + 1}: Missing required fields`);
-          skipped++;
-          continue;
-        }
-
-        // Validate length limits
-        if (teamId.length > 50) {
-          errors.push(`Row ${created + skipped + 1}: Team ID exceeds 50 characters`);
-          skipped++;
-          continue;
-        }
-        if (teamName.length > 255) {
-          errors.push(`Row ${created + skipped + 1}: Team Name exceeds 255 characters`);
-          skipped++;
-          continue;
-        }
-
-        // Check if team already exists
-        const existingTeam = await client.query(
-          'SELECT id FROM teams WHERE team_id = $1',
-          [teamId]
-        );
-
-        if (existingTeam.rows.length > 0) {
-          errors.push(`Team ID "${teamId}" already exists`);
-          skipped++;
-          continue;
-        }
-
-        // Hash password
-        const hashedPassword = await bcrypt.hash(String(password), 10);
-
-        // Insert team
-        await client.query(
-          `INSERT INTO teams (team_id, team_name, password_hash)
-           VALUES ($1, $2, $3)`,
-          [teamId, teamName, hashedPassword]
-        );
-
-        created++;
-
-      } catch (error) {
-        errors.push(`Row ${created + skipped + 1}: ${error.message}`);
-        skipped++;
-      }
-    }
-
+    const { created, skipped, errors } = await insertTeams(client, data);
     await client.query('COMMIT');
 
-    // Delete uploaded file
-    fs.unlinkSync(req.file.path);
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
     res.json({
       message: 'Teams upload completed',
-      created,
-      skipped,
-      total: data.length,
+      created, skipped, total: data.length,
       errors: errors.length > 0 ? errors : undefined
     });
 
   } catch (error) {
     await client.query('ROLLBACK');
-    
-    // Delete uploaded file on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    console.error('Error uploading teams:', error);
+    res.status(500).json({ error: 'Failed to upload teams' });
+  } finally {
+    client.release();
+  }
+});
+
+// Upload teams from JSON file
+router.post('/upload-teams-json', authenticateAdmin, uploadJSON.single('file'), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+    const text = fs.readFileSync(req.file.path, 'utf8');
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return res.status(400).json({ error: 'Invalid JSON format' });
     }
 
-    console.error('Error uploading teams:', error);
+    if (!Array.isArray(data)) return res.status(400).json({ error: 'JSON must be an array of team objects' });
+    if (data.length === 0) return res.status(400).json({ error: 'JSON file is empty' });
+    if (data.length > 500) return res.status(400).json({ error: 'Exceeds maximum of 500 teams per upload' });
+
+    await client.query('BEGIN');
+    const { created, skipped, errors } = await insertTeams(client, data);
+    await client.query('COMMIT');
+
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+
+    res.json({
+      message: 'Teams upload completed',
+      created, skipped, total: data.length,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    await client.query('ROLLBACK');
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    console.error('Error uploading teams JSON:', error);
     res.status(500).json({ error: 'Failed to upload teams' });
   } finally {
     client.release();

@@ -103,3 +103,11 @@ $$ language 'plpgsql';
 -- Apply trigger to teams table
 CREATE TRIGGER update_teams_updated_at BEFORE UPDATE ON teams
 FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Admins table
+CREATE TABLE IF NOT EXISTS admins (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    username VARCHAR(100) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
