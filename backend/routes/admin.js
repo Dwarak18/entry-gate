@@ -200,6 +200,54 @@ router.post('/upload-teams-json', authenticateAdmin, uploadJSON.single('file'), 
   }
 });
 
+// Add a single team manually
+router.post('/add-team', authenticateAdmin, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { team_id, team_name, password } = req.body;
+    if (!team_id || !team_name || !password) {
+      return res.status(400).json({ error: 'team_id, team_name, and password are required' });
+    }
+    const existing = await client.query('SELECT id FROM teams WHERE team_id = $1', [team_id.trim()]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: `Team ID "${team_id}" already exists` });
+    }
+    const hashedPassword = await bcrypt.hash(String(password), 10);
+    const result = await client.query(
+      'INSERT INTO teams (team_id, team_name, password_hash) VALUES ($1, $2, $3) RETURNING id, team_id, team_name',
+      [team_id.trim(), team_name.trim(), hashedPassword]
+    );
+    res.status(201).json({ message: 'Team created', team: result.rows[0] });
+  } catch (error) {
+    console.error('Error adding team:', error);
+    res.status(500).json({ error: 'Failed to add team' });
+  } finally {
+    client.release();
+  }
+});
+
+// Update team name
+router.put('/teams/:teamId', authenticateAdmin, async (req, res) => {
+  try {
+    const { teamId } = req.params;
+    const { team_name } = req.body;
+    if (!team_name || !team_name.trim()) {
+      return res.status(400).json({ error: 'team_name is required' });
+    }
+    const result = await pool.query(
+      'UPDATE teams SET team_name = $1 WHERE id = $2 RETURNING id, team_id, team_name',
+      [team_name.trim(), teamId]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+    res.json({ message: 'Team updated', team: result.rows[0] });
+  } catch (error) {
+    console.error('Error updating team:', error);
+    res.status(500).json({ error: 'Failed to update team' });
+  }
+});
+
 // Get all teams
 router.get('/teams', authenticateAdmin, async (req, res) => {
   try {

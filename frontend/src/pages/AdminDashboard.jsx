@@ -15,8 +15,14 @@ export default function AdminDashboard() {
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
-  const [uploadFormat, setUploadFormat] = useState('excel');
   const refreshIntervalRef = useRef(null);
+
+  // CRUD state
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [crudForm, setCrudForm] = useState({ team_id: '', team_name: '', password: '' });
+  const [crudSaving, setCrudSaving] = useState(false);
+  const [editingTeam, setEditingTeam] = useState(null); // { id, team_id, team_name }
+  const [editName, setEditName] = useState('');
 
   useEffect(() => {
     if (activeTab === 'teams') {
@@ -100,26 +106,55 @@ export default function AdminDashboard() {
       const formData = new FormData();
       formData.append('file', selectedFile);
 
+      const ext = selectedFile.name.split('.').pop().toLowerCase();
       let response;
-      if (uploadFormat === 'json') {
+      if (ext === 'json') {
         response = await adminAPI.uploadTeamsJSON(formData);
       } else {
+        // xlsx, xls, csv all go to upload-teams
         response = await adminAPI.uploadTeams(formData);
       }
       setUploadResult(response.data);
       setSelectedFile(null);
-      
       const fileInput = document.getElementById('file-upload');
       if (fileInput) fileInput.value = '';
-
-      if (activeTab === 'teams') {
-        fetchTeams();
-      }
+      fetchTeams();
     } catch (error) {
       console.error('Error uploading file:', error);
       alert(error.response?.data?.error || 'Failed to upload file');
     } finally {
       setUploading(false);
+    }
+  };
+
+  // CRUD handlers
+  const handleAddTeam = async () => {
+    const { team_id, team_name, password } = crudForm;
+    if (!team_id.trim() || !team_name.trim() || !password.trim()) {
+      alert('All fields are required');
+      return;
+    }
+    setCrudSaving(true);
+    try {
+      await adminAPI.addTeam({ team_id: team_id.trim(), team_name: team_name.trim(), password });
+      setCrudForm({ team_id: '', team_name: '', password: '' });
+      setShowAddModal(false);
+      fetchTeams();
+    } catch (error) {
+      alert(error.response?.data?.error || 'Failed to add team');
+    } finally {
+      setCrudSaving(false);
+    }
+  };
+
+  const handleEditSave = async (teamId) => {
+    if (!editName.trim()) return;
+    try {
+      await adminAPI.updateTeam(teamId, { team_name: editName.trim() });
+      setEditingTeam(null);
+      fetchTeams();
+    } catch (error) {
+      alert(error.response?.data?.error || 'Failed to update team');
     }
   };
 
@@ -270,76 +305,35 @@ export default function AdminDashboard() {
         {/* Upload Tab */}
         {activeTab === 'upload' && (
           <div className="surface-1 rounded-3xl shadow-elevated-2 p-6 animate-fade-in">
-            <h2 className="text-xl font-semibold mb-4 text-on-surface">
-              Upload Teams
-            </h2>
-
-            {/* Format selector */}
-            <div className="flex gap-2 mb-5">
-              {['excel', 'csv', 'json'].map(fmt => (
-                <button
-                  key={fmt}
-                  onClick={() => { setUploadFormat(fmt); setSelectedFile(null); setUploadResult(null); const fi = document.getElementById('file-upload'); if (fi) fi.value = ''; }}
-                  className={'flex-1 py-2 rounded-xl text-sm font-medium border transition-all ' + (
-                    uploadFormat === fmt
-                      ? 'bg-secondary-container border-secondary/30 text-secondary'
-                      : 'surface-2 border-outline-variant text-on-surface-variant hover:bg-surface-bright'
-                  )}
-                >
-                  {fmt.toUpperCase()}
-                </button>
-              ))}
+            <div className="flex justify-between items-center mb-5">
+              <h2 className="text-xl font-semibold text-on-surface">Upload Teams</h2>
+              <button
+                onClick={() => { setCrudForm({ team_id: '', team_name: '', password: '' }); setShowAddModal(true); }}
+                className="btn-secondary px-5 py-2.5 rounded-2xl font-semibold text-sm"
+              >
+                + Add Team
+              </button>
             </div>
 
-            {/* Format examples */}
-            <div className="mb-5 p-4 rounded-2xl surface-2">
-              {uploadFormat === 'excel' && (
-                <>
-                  <h3 className="font-medium mb-2 text-primary text-sm">Excel columns required:</h3>
-                  <table className="w-full text-sm text-on-surface-variant">
-                    <thead><tr className="border-b border-outline-variant">
-                      <th className="p-2 text-left text-xs">Team ID</th>
-                      <th className="p-2 text-left text-xs">Team Name</th>
-                      <th className="p-2 text-left text-xs">Password</th>
-                    </tr></thead>
-                    <tbody>
-                      <tr><td className="p-2 font-mono text-xs">TEAM001</td><td className="p-2 text-xs">Alpha Team</td><td className="p-2 font-mono text-xs">alpha123</td></tr>
-                      <tr><td className="p-2 font-mono text-xs">TEAM002</td><td className="p-2 text-xs">Beta Team</td><td className="p-2 font-mono text-xs">beta456</td></tr>
-                    </tbody>
-                  </table>
-                </>
-              )}
-              {uploadFormat === 'csv' && (
-                <>
-                  <h3 className="font-medium mb-2 text-primary text-sm">CSV format (.csv):</h3>
-                  <pre className="font-mono text-xs text-on-surface-variant bg-surface-dim p-3 rounded-xl overflow-x-auto">
-{`team_id,team_name,password
-TEAM001,Alpha Team,alpha123
-TEAM002,Beta Team,beta456`}
-                  </pre>
-                </>
-              )}
-              {uploadFormat === 'json' && (
-                <>
-                  <h3 className="font-medium mb-2 text-primary text-sm">JSON format (.json):</h3>
-                  <pre className="font-mono text-xs text-on-surface-variant bg-surface-dim p-3 rounded-xl overflow-x-auto">
-{`[
-  { "team_id": "TEAM001", "team_name": "Alpha Team", "password": "alpha123" },
-  { "team_id": "TEAM002", "team_name": "Beta Team", "password": "beta456" }
-]`}
-                  </pre>
-                </>
-              )}
+            <div className="mb-4 p-4 rounded-2xl surface-2 text-sm text-on-surface-variant">
+              Supports <span className="font-semibold text-on-surface">.xlsx</span>, <span className="font-semibold text-on-surface">.xls</span>, <span className="font-semibold text-on-surface">.csv</span>, <span className="font-semibold text-on-surface">.json</span> — format is auto-detected.
+              Columns: <code className="font-mono text-xs bg-surface-dim px-1.5 py-0.5 rounded">team_id</code>, <code className="font-mono text-xs bg-surface-dim px-1.5 py-0.5 rounded">team_name</code>, <code className="font-mono text-xs bg-surface-dim px-1.5 py-0.5 rounded">password</code>
             </div>
 
             <div className="mb-4">
               <input
                 id="file-upload"
                 type="file"
-                accept={uploadFormat === 'excel' ? '.xlsx,.xls' : uploadFormat === 'csv' ? '.csv' : '.json'}
+                accept=".xlsx,.xls,.csv,.json"
                 onChange={handleFileSelect}
                 className="w-full p-3 rounded-2xl input-m3 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border file:border-secondary/30 file:bg-secondary-container file:text-secondary file:font-medium file:text-sm file:cursor-pointer"
               />
+              {selectedFile && (
+                <p className="mt-2 text-xs text-on-surface-variant">
+                  Selected: <span className="font-mono text-primary">{selectedFile.name}</span>
+                  {' '}— format: <span className="font-semibold uppercase">{selectedFile.name.split('.').pop()}</span>
+                </p>
+              )}
             </div>
 
             <button
@@ -347,30 +341,82 @@ TEAM002,Beta Team,beta456`}
               disabled={!selectedFile || uploading}
               className="btn-secondary w-full py-3 rounded-2xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:transform-none"
             >
-              {uploading ? 'Uploading...' : `Upload Teams (${uploadFormat.toUpperCase()})`}
+              {uploading ? 'Uploading...' : 'Upload Teams'}
             </button>
 
             {uploadResult && (
               <div className={'mt-4 p-4 rounded-2xl ' + (
-                uploadResult.created > 0
-                  ? 'surface-2 border border-success/20'
-                  : 'surface-2 border border-warning/20'
+                uploadResult.created > 0 ? 'surface-2 border border-success/20' : 'surface-2 border border-warning/20'
               )}>
                 <h4 className="font-semibold mb-2 text-on-surface text-sm">Upload Results:</h4>
-                <p className="text-on-surface-variant text-sm">Created: {uploadResult.created} teams</p>
-                <p className="text-on-surface-variant text-sm">Skipped: {uploadResult.skipped} teams</p>
+                <p className="text-on-surface-variant text-sm">Created: <span className="font-bold text-success">{uploadResult.created}</span> teams</p>
+                <p className="text-on-surface-variant text-sm">Skipped: <span className="font-bold text-warning">{uploadResult.skipped}</span> teams</p>
                 {uploadResult.errors && uploadResult.errors.length > 0 && (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-error text-sm">View Errors ({uploadResult.errors.length})</summary>
                     <ul className="mt-2 ml-4 text-sm list-disc">
-                      {uploadResult.errors.map((error, idx) => (
-                        <li key={idx} className="text-error/80">{error}</li>
-                      ))}
+                      {uploadResult.errors.map((err, idx) => <li key={idx} className="text-error/80">{err}</li>)}
                     </ul>
                   </details>
                 )}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Add Team Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowAddModal(false)}>
+            <div className="surface-1 rounded-3xl shadow-elevated-3 p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-bold text-on-surface mb-5">Add New Team</h3>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-on-surface-variant mb-1 block">Team ID</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. TEAM001"
+                    value={crudForm.team_id}
+                    onChange={e => setCrudForm(f => ({ ...f, team_id: e.target.value }))}
+                    className="w-full px-4 py-2.5 rounded-2xl input-m3 font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-on-surface-variant mb-1 block">Team Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Alpha Team"
+                    value={crudForm.team_name}
+                    onChange={e => setCrudForm(f => ({ ...f, team_name: e.target.value }))}
+                    className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-on-surface-variant mb-1 block">Password</label>
+                  <input
+                    type="text"
+                    placeholder="Team login password"
+                    value={crudForm.password}
+                    onChange={e => setCrudForm(f => ({ ...f, password: e.target.value }))}
+                    className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 py-2.5 rounded-2xl surface-2 text-on-surface-variant font-medium text-sm hover:bg-surface-bright transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddTeam}
+                  disabled={crudSaving}
+                  className="flex-1 py-2.5 rounded-2xl btn-secondary font-semibold text-sm disabled:opacity-50"
+                >
+                  {crudSaving ? 'Adding...' : 'Add Team'}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -381,9 +427,17 @@ TEAM002,Beta Team,beta456`}
               <h2 className="text-xl font-semibold text-on-surface">
                 Registered Teams
               </h2>
-              <button onClick={fetchTeams} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
-                Refresh
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setCrudForm({ team_id: '', team_name: '', password: '' }); setShowAddModal(true); }}
+                  className="btn-secondary px-4 py-2 rounded-xl text-sm font-medium"
+                >
+                  + Add Team
+                </button>
+                <button onClick={fetchTeams} className="btn-primary px-4 py-2 rounded-xl text-sm font-medium">
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {loading ? (
@@ -431,6 +485,12 @@ TEAM002,Beta Team,beta456`}
                         <td className="p-3">
                           <div className="flex gap-2">
                             <button
+                              onClick={() => { setEditingTeam(team); setEditName(team.team_name); }}
+                              className="px-3 py-1.5 rounded-xl bg-primary-container text-primary border border-primary/20 hover:bg-primary/20 text-xs font-medium transition-all duration-200"
+                            >
+                              Edit
+                            </button>
+                            <button
                               onClick={() => handleResetTeam(team.id, team.team_name)}
                               className="px-3 py-1.5 rounded-xl bg-warning-container text-warning border border-warning/20 hover:bg-warning/20 text-xs font-medium transition-all duration-200"
                             >
@@ -450,6 +510,41 @@ TEAM002,Beta Team,beta456`}
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Edit Team Modal */}
+        {editingTeam && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setEditingTeam(null)}>
+            <div className="surface-1 rounded-3xl shadow-elevated-3 p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-bold text-on-surface mb-1">Edit Team</h3>
+              <p className="text-xs text-on-surface-variant font-mono mb-5">{editingTeam.team_id}</p>
+              <div>
+                <label className="text-xs font-medium text-on-surface-variant mb-1 block">Team Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleEditSave(editingTeam.id)}
+                  className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={() => setEditingTeam(null)}
+                  className="flex-1 py-2.5 rounded-2xl surface-2 text-on-surface-variant font-medium text-sm hover:bg-surface-bright transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleEditSave(editingTeam.id)}
+                  className="flex-1 py-2.5 rounded-2xl btn-primary font-semibold text-sm"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

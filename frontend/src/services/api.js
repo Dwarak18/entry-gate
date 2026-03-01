@@ -71,6 +71,8 @@ export const adminAPI = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
+  addTeam: (data) => api.post('/admin/add-team', data),
+  updateTeam: (teamId, data) => api.put(`/admin/teams/${teamId}`, data),
   getTeams: () => api.get('/admin/teams'),
   getLeaderboard: () => api.get('/admin/leaderboard'),
   exportResults: () => {
