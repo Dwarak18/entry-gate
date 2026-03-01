@@ -9,6 +9,8 @@ import ResultPage from './pages/ResultPage';
 import AdminDashboard from './pages/AdminDashboard';
 import HomePage from './pages/HomePage';
 
+// easter egg https://youtu.be/dQw4w9WgXcQ
+
 // Protected Route Component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
   const { isAuthenticated, role } = useAuthStore();
