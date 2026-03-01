@@ -33,6 +33,7 @@ export default function QuizPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [expired, setExpired] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [questionFlags, setQuestionFlags] = useState({}); // { [questionId]: 'review' }
   const [toast, setToast] = useState(null); // { msg, type: 'error'|'info' }
   const toastTimerRef = useRef(null);
 
@@ -88,6 +89,9 @@ export default function QuizPage() {
   const totalAnswered = useMemo(() => {
     return questions.filter(q => answers[q.id] || q.selected_answer).length;
   }, [questions, answers]);
+
+  // Marked for review count
+  const markedForReviewCount = useMemo(() => Object.values(questionFlags).filter(f => f === 'review').length, [questionFlags]);
 
   // Section-wise answered counts (for modal)
   const sectionAnsweredCounts = useMemo(() => {
@@ -375,6 +379,15 @@ export default function QuizPage() {
     handleSubmit(true);
   };
 
+  const toggleMarkForReview = () => {
+    const questionId = questions[currentQuestion]?.id;
+    if (!questionId) return;
+    setQuestionFlags(prev => ({
+      ...prev,
+      [questionId]: prev[questionId] === 'review' ? undefined : 'review'
+    }));
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -510,7 +523,7 @@ export default function QuizPage() {
   const isCurrentSectionComplete = sections.find(s => s.name === currentSection)?.completed;
 
   return (
-    <div className="min-h-screen bg-surface-dim px-4 py-6">
+    <div className="h-screen bg-surface-dim flex flex-col overflow-hidden">
       {/* Toast notification */}
       {toast && (
         <div
@@ -533,16 +546,32 @@ export default function QuizPage() {
             </svg>
           </button>
         </div>
-      )} */}
+      )}
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onClick={() => setShowSubmitModal(false)}>
           <div className="surface-1 rounded-3xl p-8 max-w-md w-full mx-4 shadow-elevated-3 animate-slide-up" onClick={e => e.stopPropagation()}>
             <h3 className="text-xl font-bold text-on-surface mb-4 text-center">
-              Confirm Submission
+              Review &amp; Submit
             </h3>
-            <p className="text-on-surface-variant text-sm mb-6 text-center">
-              Are you sure you want to submit? You cannot change your answers after submission.
+            <p className="text-on-surface-variant text-sm mb-5 text-center">
+              Check your progress before submitting. This action is final.
             </p>
+            
+            {/* Status summary */}
+            <div className="grid grid-cols-3 gap-2 mb-5">
+              <div className="p-3 rounded-2xl text-center bg-success/10 border border-success/20">
+                <p className="text-xl font-bold text-success font-mono">{totalAnswered}</p>
+                <p className="text-[11px] text-success mt-0.5">Answered</p>
+              </div>
+              <div className="p-3 rounded-2xl text-center bg-warning/10 border border-warning/20">
+                <p className="text-xl font-bold text-warning font-mono">{markedForReviewCount}</p>
+                <p className="text-[11px] text-warning mt-0.5">For Review</p>
+              </div>
+              <div className="p-3 rounded-2xl text-center bg-error/10 border border-error/20">
+                <p className="text-xl font-bold text-error font-mono">{questions.length - totalAnswered}</p>
+                <p className="text-[11px] text-error mt-0.5">Not Answered</p>
+              </div>
+            </div>
             
             {/* Section-wise breakdown */}
             <div className="space-y-2 mb-6">
@@ -596,227 +625,262 @@ export default function QuizPage() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="max-w-4xl mx-auto mb-4">
-        <div className="surface-1 p-4 rounded-2xl shadow-elevated-1 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div>
-              <p className="font-semibold text-on-surface">{user?.team_name}</p>
-              <p className="text-xs text-on-surface-variant">
-                Total: {totalAnswered}/{questions.length} answered
+      {/* Fixed Top Bar */}
+      <div className="shrink-0 px-4 pt-3 pb-2 space-y-2">
+        {/* Header */}
+        <div className="max-w-4xl mx-auto">
+          <div className="surface-1 p-3 rounded-2xl shadow-elevated-1 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div>
+                <p className="font-semibold text-on-surface text-sm">{user?.team_name}</p>
+                <p className="text-xs text-on-surface-variant">
+                  Total: {totalAnswered}/{questions.length} answered
+                </p>
+              </div>
+              <button
+                onClick={handleLogout}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium bg-error-container text-error border border-error/20 hover:bg-error/20 transition-all duration-200"
+                title="Logout"
+              >
+                Logout
+              </button>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-on-surface-variant">Time Remaining</p>
+              <p className={'text-xl font-bold font-mono ' + timerClass}>
+                {formatTime(timeRemaining)}
               </p>
             </div>
-            <button
-              onClick={handleLogout}
-              className="px-3 py-1.5 rounded-xl text-xs font-medium bg-error-container text-error border border-error/20 hover:bg-error/20 transition-all duration-200"
-              title="Logout"
-            >
-              Logout
-            </button>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-on-surface-variant">Time Remaining</p>
-            <p className={'text-2xl font-bold font-mono ' + timerClass}>
-              {formatTime(timeRemaining)}
-            </p>
           </div>
         </div>
-      </div>
 
-      {/* Section Navigation Bar */}
-      <div className="max-w-4xl mx-auto mb-4">
-        <div className="surface-1 p-2 rounded-2xl shadow-elevated-1 flex gap-2">
-          {SECTION_ORDER.map((sName, idx) => {
-            const sec = sections.find(s => s.name === sName);
-            const isActive = sName === currentSection;
-            const isCompleted = sec?.completed;
-            const isLocked = !isCompleted && !isActive;
-            const sectionQs = sectionQuestions[sName] || [];
-            const answeredInSection = sectionQs.filter(q => answers[q.id] || q.selected_answer).length;
-
-            return (
-              <button
-                key={sName}
-                disabled={isLocked}
-                onClick={() => {
-                  if (!isLocked && !isCompleted) {
-                    let start = 0;
-                    for (const s of SECTION_ORDER) {
-                      if (s === sName) break;
-                      start += (sectionQuestions[s] || []).length;
-                    }
-                    setCurrentQuestion(start);
-                  }
-                }}
-                className={'flex-1 py-2.5 px-3 rounded-xl text-xs sm:text-sm font-medium transition-all duration-200 text-center border ' + (
-                  isCompleted
-                    ? 'section-complete text-success'
-                    : isActive
-                    ? 'section-active text-primary'
-                    : 'section-locked text-on-surface-variant/40 cursor-not-allowed'
-                )}
-              >
-                <div>{sName}</div>
-                <div className="text-[10px] opacity-70 mt-0.5">
-                  {isCompleted ? '✓ Done' : answeredInSection + '/' + sectionQs.length}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Section Header */}
-      <div className="max-w-4xl mx-auto mb-4">
-        <div className="surface-2 p-3 rounded-2xl flex justify-between items-center">
-          <h3 className="font-semibold text-primary text-sm">
-            {currentSection ? SECTION_LABELS[currentSection] : 'All Sections Complete'}
-          </h3>
-          <span className="text-xs font-medium text-on-surface-variant font-mono">
-            {currentSection ? sectionAnsweredCount + ' / ' + currentSectionQs.length + ' answered' : ''}
-          </span>
-        </div>
-      </div>
-
-      {/* All Complete — Show Submit */}
-      {allSectionsComplete && (
-        <div className="max-w-4xl mx-auto mb-6">
-          <div className="surface-1 p-6 rounded-3xl text-center border border-success/20 shadow-glow-success">
-            <p className="text-base font-semibold mb-4 text-success">
-              All sections complete! You can now submit your quiz.
-            </p>
-            <button
-              onClick={() => handleSubmit(false)}
-              disabled={submitting}
-              className="btn-success px-10 py-4 rounded-2xl font-semibold text-lg disabled:opacity-50 disabled:hover:transform-none"
-            >
-              {submitting ? 'Submitting...' : 'Submit Quiz'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Question Card */}
-      {currentSection && question && (
+        {/* Section Navigation Bar */}
         <div className="max-w-4xl mx-auto">
-          <div className="surface-1 p-8 rounded-3xl shadow-elevated-2 animate-fade-in">
-            {/* Question Header */}
-            <div className="flex justify-between items-center mb-6">
-              <span className="px-3 py-1.5 rounded-xl text-xs font-medium bg-primary-container border border-primary/15 text-primary">
-                {question.category}
-              </span>
-              <span className="text-xs text-on-surface-variant font-mono">
-                Question {localIndex + 1} of {currentSectionQs.length}
-              </span>
-            </div>
+          <div className="surface-1 p-2 rounded-2xl shadow-elevated-1 flex gap-2">
+            {SECTION_ORDER.map((sName) => {
+              const sec = sections.find(s => s.name === sName);
+              const isActive = sName === currentSection;
+              const isCompleted = sec?.completed;
+              const isLocked = !isCompleted && !isActive;
+              const sectionQs = sectionQuestions[sName] || [];
+              const answeredInSection = sectionQs.filter(q => answers[q.id] || q.selected_answer).length;
 
-            {/* Question Text */}
-            <h3 className="text-lg font-medium mb-6 text-on-surface leading-relaxed">
-              {question.question_text}
+              return (
+                <button
+                  key={sName}
+                  disabled={isLocked}
+                  onClick={() => {
+                    if (!isLocked && !isCompleted) {
+                      let start = 0;
+                      for (const s of SECTION_ORDER) {
+                        if (s === sName) break;
+                        start += (sectionQuestions[s] || []).length;
+                      }
+                      setCurrentQuestion(start);
+                    }
+                  }}
+                  className={'flex-1 py-2 px-3 rounded-xl text-xs font-medium transition-all duration-200 text-center border ' + (
+                    isCompleted
+                      ? 'section-complete text-success'
+                      : isActive
+                      ? 'section-active text-primary'
+                      : 'section-locked text-on-surface-variant/40 cursor-not-allowed'
+                  )}
+                >
+                  <div>{sName}</div>
+                  <div className="text-[10px] opacity-70 mt-0.5">
+                    {isCompleted ? '✓ Done' : answeredInSection + '/' + sectionQs.length}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-y-auto px-4 pb-4">
+        <div className="max-w-4xl mx-auto space-y-3">
+
+          {/* Section Header */}
+          <div className="surface-2 p-3 rounded-2xl flex justify-between items-center">
+            <h3 className="font-semibold text-primary text-sm">
+              {currentSection ? SECTION_LABELS[currentSection] : 'All Sections Complete'}
             </h3>
+            <span className="text-xs font-medium text-on-surface-variant font-mono">
+              {currentSection ? sectionAnsweredCount + ' / ' + currentSectionQs.length + ' answered' : ''}
+            </span>
+          </div>
 
-            {/* Options */}
-            <div className="space-y-3">
-              {['A', 'B', 'C', 'D'].map((option) => (
-                <button
-                  key={option}
-                  onClick={() => handleAnswerSelect(option)}
-                  disabled={isCurrentSectionComplete}
-                  className={'w-full p-4 rounded-2xl text-left transition-all duration-200 border disabled:opacity-50 disabled:cursor-not-allowed ' + (
-                    selectedAnswer === option
-                      ? 'option-selected text-on-surface'
-                      : 'bg-surface-container-high/50 border-outline-variant text-on-surface-variant hover:border-primary/30 hover:bg-primary-container'
-                  )}
-                >
-                  <span className="font-medium mr-3 text-primary">{option}.</span>
-                  {question['option_' + option.toLowerCase()]}
-                </button>
-              ))}
-            </div>
-
-            {/* Navigation */}
-            <div className="mt-8 flex justify-between items-center">
+          {/* All Complete — Show Submit */}
+          {allSectionsComplete && (
+            <div className="surface-1 p-6 rounded-3xl text-center border border-success/20 shadow-glow-success">
+              <p className="text-base font-semibold mb-4 text-success">
+                All sections complete! You can now submit your quiz.
+              </p>
               <button
-                onClick={handlePrevious}
-                disabled={localIndex === 0}
-                className="px-6 py-3 rounded-2xl font-medium transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed surface-2 text-on-surface-variant hover:text-primary"
+                onClick={() => handleSubmit(false)}
+                disabled={submitting}
+                className="btn-success px-10 py-4 rounded-2xl font-semibold text-lg disabled:opacity-50 disabled:hover:transform-none"
               >
-                ← Previous
+                {submitting ? 'Submitting...' : 'Submit Quiz'}
               </button>
-
-              {localIndex === currentSectionQs.length - 1 ? (
-                <button
-                  onClick={handleCompleteSection}
-                  disabled={completingSection}
-                  className={'px-8 py-3 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 border ' + (
-                    sectionAnsweredCount < currentSectionQs.length
-                      ? 'border-outline-variant text-on-surface-variant/40 cursor-not-allowed bg-surface-container'
-                      : 'btn-success'
-                  )}
-                >
-                  {completingSection ? 'Completing...' : sectionAnsweredCount < currentSectionQs.length ? 'Answer all (' + sectionAnsweredCount + '/' + currentSectionQs.length + ')' : 'Complete ' + currentSection + ' ✓'}
-                </button>
-              ) : (
-                <button
-                  onClick={handleNext}
-                  className="btn-primary px-6 py-3 rounded-2xl font-medium"
-                >
-                  Next →
-                </button>
-              )}
             </div>
-          </div>
+          )}
 
-          {/* Question Grid */}
-          <div className="mt-4 p-5 rounded-2xl surface-1 shadow-elevated-1">
-            <h4 className="text-xs font-medium mb-3 text-on-surface-variant">
-              {currentSection} Questions
-            </h4>
-            <div className="grid grid-cols-10 gap-2">
-              {currentSectionQs.map((q, idx) => {
-                const globalIdx = sectionStartIndex + idx;
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => setCurrentQuestion(globalIdx)}
-                    className={'aspect-square rounded-xl text-xs font-medium transition-all duration-200 border ' + (
-                      globalIdx === currentQuestion
-                        ? 'bg-primary/20 text-primary border-primary/40'
-                        : answers[q.id] || q.selected_answer
-                        ? 'bg-success/10 text-success border-success/30'
-                        : 'bg-surface-container border-outline-variant text-on-surface-variant/50 hover:border-primary/20'
+          {/* Question Card */}
+          {currentSection && question && (
+            <>
+              <div className="surface-1 p-6 rounded-3xl shadow-elevated-2 animate-fade-in">
+                {/* Question Header */}
+                <div className="flex justify-between items-center mb-4">
+                  <span className="px-3 py-1.5 rounded-xl text-xs font-medium bg-primary-container border border-primary/15 text-primary">
+                    {question.category}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {/* Mark for Review button */}
+                    {!isCurrentSectionComplete && (
+                      <button
+                        onClick={toggleMarkForReview}
+                        className={'px-3 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 border ' + (
+                          questionFlags[question.id] === 'review'
+                            ? 'bg-warning/20 border-warning/40 text-warning'
+                            : 'border-outline-variant text-on-surface-variant hover:border-warning/40 hover:text-warning'
+                        )}
+                      >
+                        {questionFlags[question.id] === 'review' ? '🔖 Marked' : '🔖 Mark for Review'}
+                      </button>
                     )}
-                  >
-                    {idx + 1}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                    <span className="text-xs text-on-surface-variant font-mono">
+                      Q {localIndex + 1}/{currentSectionQs.length}
+                    </span>
+                  </div>
+                </div>
 
-          {/* Completed sections grids (locked) */}
-          {sections.filter(s => s.completed && s.name !== currentSection).map(sec => {
-            const secQs = sectionQuestions[sec.name] || [];
-            return (
-              <div key={sec.name} className="mt-3 p-4 rounded-2xl surface-1 shadow-elevated-1 opacity-60">
-                <h4 className="text-xs font-medium mb-2 text-on-surface-variant flex items-center gap-2">
-                  {sec.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">✓ Locked</span>
-                </h4>
-                <div className="grid grid-cols-13 gap-1.5">
-                  {secQs.map((q, idx) => (
-                    <div
-                      key={idx}
-                      className="aspect-square rounded-lg text-[10px] font-medium flex items-center justify-center grid-locked"
+                {/* Question Text */}
+                <h3 className="text-base font-medium mb-5 text-on-surface leading-relaxed">
+                  {question.question_text}
+                </h3>
+
+                {/* Options */}
+                <div className="space-y-2">
+                  {['A', 'B', 'C', 'D'].map((option) => (
+                    <button
+                      key={option}
+                      onClick={() => handleAnswerSelect(option)}
+                      disabled={isCurrentSectionComplete}
+                      className={'w-full p-3.5 rounded-2xl text-left transition-all duration-200 border disabled:opacity-50 disabled:cursor-not-allowed ' + (
+                        selectedAnswer === option
+                          ? 'option-selected text-on-surface'
+                          : 'bg-surface-container-high/50 border-outline-variant text-on-surface-variant hover:border-primary/30 hover:bg-primary-container'
+                      )}
                     >
-                      {idx + 1}
-                    </div>
+                      <span className="font-medium mr-3 text-primary">{option}.</span>
+                      {question['option_' + option.toLowerCase()]}
+                    </button>
                   ))}
                 </div>
+
+                {/* Navigation */}
+                <div className="mt-6 flex justify-between items-center">
+                  <button
+                    onClick={handlePrevious}
+                    disabled={localIndex === 0}
+                    className="px-5 py-2.5 rounded-2xl font-medium transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed surface-2 text-on-surface-variant hover:text-primary"
+                  >
+                    ← Previous
+                  </button>
+
+                  {localIndex === currentSectionQs.length - 1 ? (
+                    <button
+                      onClick={handleCompleteSection}
+                      disabled={completingSection || sectionAnsweredCount < currentSectionQs.length}
+                      className={'px-7 py-2.5 rounded-2xl font-semibold transition-all duration-200 disabled:opacity-50 border ' + (
+                        sectionAnsweredCount < currentSectionQs.length
+                          ? 'border-outline-variant text-on-surface-variant/40 cursor-not-allowed bg-surface-container'
+                          : 'btn-success'
+                      )}
+                    >
+                      {completingSection ? 'Completing...' : sectionAnsweredCount < currentSectionQs.length ? 'Answer all (' + sectionAnsweredCount + '/' + currentSectionQs.length + ')' : 'Complete ' + currentSection + ' ✓'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleNext}
+                      className="btn-primary px-5 py-2.5 rounded-2xl font-medium"
+                    >
+                      Next →
+                    </button>
+                  )}
+                </div>
               </div>
-            );
-          })}
+
+              {/* Question Palette */}
+              <div className="p-4 rounded-2xl surface-1 shadow-elevated-1">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="text-xs font-medium text-on-surface-variant">{currentSection} — Question Palette</h4>
+                  {/* Legend */}
+                  <div className="flex items-center gap-3 text-[10px] text-on-surface-variant">
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-success/20 border border-success/40 inline-block"></span> Answered</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-warning/20 border border-warning/40 inline-block"></span> Review</span>
+                    <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-surface-container border border-outline-variant inline-block"></span> Not Visited</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-10 gap-1.5">
+                  {currentSectionQs.map((q, idx) => {
+                    const globalIdx = sectionStartIndex + idx;
+                    const isAnswered = !!(answers[q.id] || q.selected_answer);
+                    const isReview = questionFlags[q.id] === 'review';
+                    const isCurrent = globalIdx === currentQuestion;
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => setCurrentQuestion(globalIdx)}
+                        title={isAnswered && isReview ? 'Answered + Review' : isAnswered ? 'Answered' : isReview ? 'Marked for Review' : 'Not Visited'}
+                        className={'aspect-square rounded-xl text-xs font-semibold transition-all duration-200 border ' + (
+                          isCurrent
+                            ? 'bg-primary/30 text-primary border-primary/60 ring-2 ring-primary/30'
+                            : isAnswered && isReview
+                            ? 'bg-sky-500/20 text-sky-400 border-sky-400/40'
+                            : isAnswered
+                            ? 'bg-success/15 text-success border-success/40'
+                            : isReview
+                            ? 'bg-warning/20 text-warning border-warning/40'
+                            : 'bg-surface-container border-outline-variant text-on-surface-variant/50 hover:border-primary/20'
+                        )}
+                      >
+                        {idx + 1}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Completed sections grids (locked) */}
+              {sections.filter(s => s.completed && s.name !== currentSection).map(sec => {
+                const secQs = sectionQuestions[sec.name] || [];
+                return (
+                  <div key={sec.name} className="p-3.5 rounded-2xl surface-1 shadow-elevated-1 opacity-60">
+                    <h4 className="text-xs font-medium mb-2 text-on-surface-variant flex items-center gap-2">
+                      {sec.name} <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success border border-success/20">✓ Locked</span>
+                    </h4>
+                    <div className="grid grid-cols-13 gap-1.5">
+                      {secQs.map((q, idx) => (
+                        <div
+                          key={idx}
+                          className="aspect-square rounded-lg text-[10px] font-medium flex items-center justify-center grid-locked"
+                        >
+                          {idx + 1}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
         </div>
-      )}
+      </div>
     </div>
   );
 }
