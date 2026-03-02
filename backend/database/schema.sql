@@ -4,7 +4,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Teams table
-CREATE TABLE teams (
+CREATE TABLE IF NOT EXISTS teams (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id VARCHAR(50) UNIQUE NOT NULL,
     team_name VARCHAR(255) NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE teams (
 );
 
 -- Questions table
-CREATE TABLE questions (
+CREATE TABLE IF NOT EXISTS questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     category VARCHAR(50) NOT NULL CHECK (category IN ('C', 'Python', 'Java', 'SQL')),
     question_text TEXT NOT NULL,
@@ -30,7 +30,7 @@ CREATE TABLE questions (
 );
 
 -- Team assigned questions (tracks which questions each team gets)
-CREATE TABLE team_questions (
+CREATE TABLE IF NOT EXISTS team_questions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
@@ -41,7 +41,7 @@ CREATE TABLE team_questions (
 );
 
 -- Team attempts (tracks answers submitted by teams)
-CREATE TABLE team_attempts (
+CREATE TABLE IF NOT EXISTS team_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
@@ -52,7 +52,7 @@ CREATE TABLE team_attempts (
 );
 
 -- Results table (final submission data)
-CREATE TABLE results (
+CREATE TABLE IF NOT EXISTS results (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     total_score INTEGER NOT NULL DEFAULT 0 CHECK (total_score >= 0),
@@ -63,7 +63,7 @@ CREATE TABLE results (
 );
 
 -- Team sections (tracks section completion per team)
-CREATE TABLE team_sections (
+CREATE TABLE IF NOT EXISTS team_sections (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     section_name VARCHAR(20) NOT NULL CHECK (section_name IN ('C', 'Python', 'Java', 'SQL')),
@@ -73,7 +73,7 @@ CREATE TABLE team_sections (
 );
 
 -- Cheat/activity logs table (anti-cheat monitoring)
-CREATE TABLE cheat_logs (
+CREATE TABLE IF NOT EXISTS cheat_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     team_id UUID NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     event_type VARCHAR(50) NOT NULL,

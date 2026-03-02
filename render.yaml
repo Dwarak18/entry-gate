@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: h2o-backend
+    env: node
+    rootDir: backend
+    buildCommand: npm install && node scripts/initDatabase.js && node scripts/seedQuestions.js
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: PORT
+        value: 5000

@@ -17,8 +17,11 @@ async function initDatabase() {
     const schema = fs.readFileSync(schemaPath, 'utf8');
     
     await client.query(schema);
+
+    // Apply migrations for existing databases
+    await client.query(`ALTER TABLE teams ADD COLUMN IF NOT EXISTS plain_password TEXT;`);
     
-    console.log('✅ Database schema created successfully!');
+    console.log('✅ Database schema created/verified successfully!');
 
     // Seed default admin if none exists
     const adminCheck = await client.query('SELECT COUNT(*) FROM admins');
