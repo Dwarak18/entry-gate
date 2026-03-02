@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { apiLimiter } from './middleware/rateLimiter.js';
+import pool from './config/database.js';
 
 // Import routes
 import authRoutes from './routes/auth.js';
@@ -69,15 +70,31 @@ app.use((err, req, res, next) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`
+async function runMigrations() {
+  const client = await pool.connect();
+  try {
+    // Ensure plain_password column exists (safe to run multiple times)
+    await client.query(`ALTER TABLE teams ADD COLUMN IF NOT EXISTS plain_password TEXT;`);
+    console.log('✅ DB migrations applied');
+  } catch (err) {
+    // Non-fatal: table may not exist yet (first deploy runs init-db separately)
+    console.warn('⚠️  Migration skipped (DB may not be initialized yet):', err.message);
+  } finally {
+    client.release();
+  }
+}
+
+runMigrations().then(() => {
+  app.listen(PORT, () => {
+    console.log(`
 ╔════════════════════════════════════════════════════╗
 ║   🚀 MCQ Competition Platform - Backend API       ║
 ║   Server running on port ${PORT}                      ║
 ║   Environment: ${process.env.NODE_ENV || 'development'}                      ║
 ║   Timestamp: ${new Date().toLocaleString()}           ║
 ╚════════════════════════════════════════════════════╝
-  `);
+    `);
+  });
 });
 
 export default app;
