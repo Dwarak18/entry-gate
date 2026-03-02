@@ -9,6 +9,7 @@ CREATE TABLE teams (
     team_id VARCHAR(50) UNIQUE NOT NULL,
     team_name VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
+    plain_password TEXT,  -- Plain-text password stored for admin visibility
     quiz_started_at TIMESTAMP,  -- Server-side timer: recorded when questions first assigned
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

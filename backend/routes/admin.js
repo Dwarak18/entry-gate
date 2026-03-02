@@ -95,8 +95,8 @@ async function insertTeams(client, data) {
 
       const hashedPassword = await bcrypt.hash(String(password), 10);
       await client.query(
-        'INSERT INTO teams (team_id, team_name, password_hash) VALUES ($1, $2, $3)',
-        [teamId, teamName, hashedPassword]
+        'INSERT INTO teams (team_id, team_name, password_hash, plain_password) VALUES ($1, $2, $3, $4)',
+        [teamId, teamName, hashedPassword, String(password)]
       );
       created++;
     } catch (error) {
@@ -214,8 +214,8 @@ router.post('/add-team', authenticateAdmin, async (req, res) => {
     }
     const hashedPassword = await bcrypt.hash(String(password), 10);
     const result = await client.query(
-      'INSERT INTO teams (team_id, team_name, password_hash) VALUES ($1, $2, $3) RETURNING id, team_id, team_name',
-      [team_id.trim(), team_name.trim(), hashedPassword]
+      'INSERT INTO teams (team_id, team_name, password_hash, plain_password) VALUES ($1, $2, $3, $4) RETURNING id, team_id, team_name, plain_password',
+      [team_id.trim(), team_name.trim(), hashedPassword, String(password)]
     );
     res.status(201).json({ message: 'Team created', team: result.rows[0] });
   } catch (error) {
@@ -226,18 +226,30 @@ router.post('/add-team', authenticateAdmin, async (req, res) => {
   }
 });
 
-// Update team name
+// Update team name and/or password
 router.put('/teams/:teamId', authenticateAdmin, async (req, res) => {
+  const client = await pool.connect();
   try {
     const { teamId } = req.params;
-    const { team_name } = req.body;
+    const { team_name, password } = req.body;
     if (!team_name || !team_name.trim()) {
       return res.status(400).json({ error: 'team_name is required' });
     }
-    const result = await pool.query(
-      'UPDATE teams SET team_name = $1 WHERE id = $2 RETURNING id, team_id, team_name',
-      [team_name.trim(), teamId]
-    );
+
+    let result;
+    if (password && password.trim()) {
+      const hashedPassword = await bcrypt.hash(String(password), 10);
+      result = await client.query(
+        'UPDATE teams SET team_name = $1, password_hash = $2, plain_password = $3, updated_at = NOW() WHERE id = $4 RETURNING id, team_id, team_name, plain_password',
+        [team_name.trim(), hashedPassword, password.trim(), teamId]
+      );
+    } else {
+      result = await client.query(
+        'UPDATE teams SET team_name = $1, updated_at = NOW() WHERE id = $2 RETURNING id, team_id, team_name, plain_password',
+        [team_name.trim(), teamId]
+      );
+    }
+
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Team not found' });
     }
@@ -245,6 +257,8 @@ router.put('/teams/:teamId', authenticateAdmin, async (req, res) => {
   } catch (error) {
     console.error('Error updating team:', error);
     res.status(500).json({ error: 'Failed to update team' });
+  } finally {
+    client.release();
   }
 });
 
@@ -256,6 +270,7 @@ router.get('/teams', authenticateAdmin, async (req, res) => {
         t.id,
         t.team_id,
         t.team_name,
+        t.plain_password,
         t.created_at,
         r.total_score,
         r.submitted_at,
@@ -270,14 +285,23 @@ router.get('/teams', authenticateAdmin, async (req, res) => {
        ORDER BY t.created_at DESC`
     );
 
+    // Compute rank: only submitted (completed) teams ranked by score DESC
+    const submitted = result.rows
+      .filter(r => r.submitted_at)
+      .sort((a, b) => (b.total_score || 0) - (a.total_score || 0));
+    const rankMap = {};
+    submitted.forEach((r, i) => { rankMap[r.id] = i + 1; });
+
     const teams = result.rows.map(row => ({
       id: row.id,
       team_id: row.team_id,
       team_name: row.team_name,
+      plain_password: row.plain_password || null,
       created_at: row.created_at,
       score: row.total_score,
       submitted_at: row.submitted_at,
       answered_count: parseInt(row.answered_count || 0),
+      rank: rankMap[row.id] || null,
       status: row.submitted_at ? 'completed' : (parseInt(row.answered_count) > 0 ? 'in-progress' : 'not-started')
     }));
 

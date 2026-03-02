@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/store';
 import { adminAPI } from '../services/api';
@@ -21,8 +21,12 @@ export default function AdminDashboard() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [crudForm, setCrudForm] = useState({ team_id: '', team_name: '', password: '' });
   const [crudSaving, setCrudSaving] = useState(false);
-  const [editingTeam, setEditingTeam] = useState(null); // { id, team_id, team_name }
+  const [editingTeam, setEditingTeam] = useState(null);
   const [editName, setEditName] = useState('');
+  const [editPassword, setEditPassword] = useState('');
+  const [showPasswordFor, setShowPasswordFor] = useState(null); // team id whose password is visible
+  const [showAddPassword, setShowAddPassword] = useState(false);
+  const [showEditPassword, setShowEditPassword] = useState(false);
 
   useEffect(() => {
     if (activeTab === 'teams') {
@@ -149,9 +153,13 @@ export default function AdminDashboard() {
 
   const handleEditSave = async (teamId) => {
     if (!editName.trim()) return;
+    const updateData = { team_name: editName.trim() };
+    if (editPassword.trim()) updateData.password = editPassword.trim();
     try {
-      await adminAPI.updateTeam(teamId, { team_name: editName.trim() });
+      await adminAPI.updateTeam(teamId, updateData);
       setEditingTeam(null);
+      setEditPassword('');
+      setShowEditPassword(false);
       fetchTeams();
     } catch (error) {
       alert(error.response?.data?.error || 'Failed to update team');
@@ -392,13 +400,32 @@ export default function AdminDashboard() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-on-surface-variant mb-1 block">Password</label>
-                  <input
-                    type="text"
-                    placeholder="Team login password"
-                    value={crudForm.password}
-                    onChange={e => setCrudForm(f => ({ ...f, password: e.target.value }))}
-                    className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
-                  />
+                  <div className="relative">
+                    <input
+                      type={showAddPassword ? 'text' : 'password'}
+                      placeholder="Team login password"
+                      value={crudForm.password}
+                      onChange={e => setCrudForm(f => ({ ...f, password: e.target.value }))}
+                      className="w-full px-4 py-2.5 pr-10 rounded-2xl input-m3 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showAddPassword ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="flex gap-3 mt-6">
@@ -426,6 +453,7 @@ export default function AdminDashboard() {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold text-on-surface">
                 Registered Teams
+                <span className="ml-2 text-sm font-normal text-on-surface-variant">({teams.length})</span>
               </h2>
               <div className="flex gap-2">
                 <button
@@ -453,39 +481,94 @@ export default function AdminDashboard() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-outline">
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Team ID</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Team Name</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Status</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Score</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Progress</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium">Actions</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Team Code</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Team Name</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Password</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium uppercase tracking-wide">Score</th>
+                      <th className="p-3 text-center text-on-surface-variant text-xs font-medium uppercase tracking-wide">Rank</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Status</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {teams.map((team) => (
-                      <tr 
+                      <tr
                         key={team.id}
                         className="border-b border-outline-variant hover:bg-surface-bright transition-colors duration-150"
                       >
-                        <td className="p-3 font-mono text-sm text-primary/80">
+                        {/* Team Code */}
+                        <td className="p-3 font-mono text-sm font-semibold text-primary/90">
                           {team.team_id}
                         </td>
-                        <td className="p-3 text-on-surface text-sm">
+
+                        {/* Team Name */}
+                        <td className="p-3 text-on-surface text-sm font-medium">
                           {team.team_name}
                         </td>
+
+                        {/* Password with eye toggle */}
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-xs text-on-surface-variant">
+                              {showPasswordFor === team.id
+                                ? (team.plain_password || <span className="italic opacity-50">not stored</span>)
+                                : (team.plain_password ? '••••••••' : <span className="italic opacity-50">—</span>)}
+                            </span>
+                            {team.plain_password && (
+                              <button
+                                onClick={() => setShowPasswordFor(showPasswordFor === team.id ? null : team.id)}
+                                className="p-1 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-150"
+                                title={showPasswordFor === team.id ? 'Hide password' : 'Show password'}
+                              >
+                                {showPasswordFor === team.id ? (
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                                  </svg>
+                                ) : (
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Score */}
+                        <td className="p-3 text-center font-semibold text-on-surface font-mono text-sm">
+                          {team.score !== null && team.score !== undefined
+                            ? <span className="text-primary">{team.score}<span className="text-on-surface-variant font-normal">/50</span></span>
+                            : <span className="text-on-surface-variant">—</span>}
+                        </td>
+
+                        {/* Rank */}
+                        <td className="p-3 text-center">
+                          {team.rank ? (
+                            <span className={
+                              'font-bold font-mono text-sm ' +
+                              (team.rank === 1 ? 'rank-gold' :
+                               team.rank === 2 ? 'rank-silver' :
+                               team.rank === 3 ? 'rank-bronze' :
+                               'text-on-surface-variant')
+                            }>
+                              #{team.rank}
+                            </span>
+                          ) : (
+                            <span className="text-on-surface-variant text-sm">—</span>
+                          )}
+                        </td>
+
+                        {/* Status */}
                         <td className="p-3">
                           {getStatusBadge(team.status)}
                         </td>
-                        <td className="p-3 font-semibold text-on-surface font-mono text-sm">
-                          {team.score !== null && team.score !== undefined ? team.score + '/50' : '-'}
-                        </td>
-                        <td className="p-3 text-on-surface-variant font-mono text-sm">
-                          {team.answered_count}/50
-                        </td>
+
+                        {/* Actions */}
                         <td className="p-3">
-                          <div className="flex gap-2">
+                          <div className="flex gap-1.5 flex-wrap">
                             <button
-                              onClick={() => { setEditingTeam(team); setEditName(team.team_name); }}
+                              onClick={() => { setEditingTeam(team); setEditName(team.team_name); setEditPassword(''); setShowEditPassword(false); }}
                               className="px-3 py-1.5 rounded-xl bg-primary-container text-primary border border-primary/20 hover:bg-primary/20 text-xs font-medium transition-all duration-200"
                             >
                               Edit
@@ -515,24 +598,58 @@ export default function AdminDashboard() {
 
         {/* Edit Team Modal */}
         {editingTeam && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setEditingTeam(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => { setEditingTeam(null); setEditPassword(''); setShowEditPassword(false); }}>
             <div className="surface-1 rounded-3xl shadow-elevated-3 p-6 w-full max-w-md mx-4" onClick={e => e.stopPropagation()}>
               <h3 className="text-lg font-bold text-on-surface mb-1">Edit Team</h3>
               <p className="text-xs text-on-surface-variant font-mono mb-5">{editingTeam.team_id}</p>
-              <div>
-                <label className="text-xs font-medium text-on-surface-variant mb-1 block">Team Name</label>
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleEditSave(editingTeam.id)}
-                  className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
-                  autoFocus
-                />
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-on-surface-variant mb-1 block">Team Name</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleEditSave(editingTeam.id)}
+                    className="w-full px-4 py-2.5 rounded-2xl input-m3 text-sm"
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-on-surface-variant mb-1 block">
+                    Password
+                    <span className="ml-1 font-normal opacity-60">(leave blank to keep current)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showEditPassword ? 'text' : 'password'}
+                      value={editPassword}
+                      onChange={e => setEditPassword(e.target.value)}
+                      placeholder={editingTeam.plain_password ? '••••••••' : 'Enter new password'}
+                      className="w-full px-4 py-2.5 pr-10 rounded-2xl input-m3 text-sm"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowEditPassword(v => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
+                      tabIndex={-1}
+                    >
+                      {showEditPassword ? (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
               <div className="flex gap-3 mt-6">
                 <button
-                  onClick={() => setEditingTeam(null)}
+                  onClick={() => { setEditingTeam(null); setEditPassword(''); setShowEditPassword(false); }}
                   className="flex-1 py-2.5 rounded-2xl surface-2 text-on-surface-variant font-medium text-sm hover:bg-surface-bright transition-all"
                 >
                   Cancel
