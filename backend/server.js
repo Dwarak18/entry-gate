@@ -23,17 +23,9 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 
-// CORS configuration — allow multiple origins for flexibility
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
-  .split(',')
-  .map(o => o.trim());
-
+// CORS — open to all origins so phones, tablets and any device can connect
 app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    callback(new Error(`CORS: origin ${origin} not allowed`));
-  },
+  origin: true,   // reflect request origin (allows all)
   credentials: true,
 }));
 
