@@ -23,18 +23,18 @@ async function initDatabase() {
     
     console.log('✅ Database schema created/verified successfully!');
 
-    // Seed default admin if none exists
-    const adminCheck = await client.query('SELECT COUNT(*) FROM admins');
-    if (parseInt(adminCheck.rows[0].count) === 0) {
-      const passwordHash = await bcrypt.hash('heisenberg', 10);
-      await client.query(
-        'INSERT INTO admins (username, password_hash) VALUES ($1, $2)',
-        ['admin', passwordHash]
-      );
-      console.log('✅ Default admin created: username=admin, password=heisenberg');
-    } else {
-      console.log('ℹ️  Admin already exists, skipping seed.');
-    }
+    // Always upsert admin — uses ADMIN_PASSWORD env var, fallback to 'Admin@h2o2026'
+    const adminUsername = process.env.ADMIN_USERNAME || 'admin';
+    const adminPassword = process.env.ADMIN_PASSWORD || 'Admin@h2o2026';
+    const passwordHash = await bcrypt.hash(adminPassword, 10);
+
+    await client.query(
+      `INSERT INTO admins (username, password_hash)
+       VALUES ($1, $2)
+       ON CONFLICT (username) DO UPDATE SET password_hash = EXCLUDED.password_hash`,
+      [adminUsername, passwordHash]
+    );
+    console.log(`✅ Admin upserted: username=${adminUsername}, password=${adminPassword}`);
     
   } catch (error) {
     console.error('❌ Error initializing database:', error);
