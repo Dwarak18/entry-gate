@@ -20,14 +20,25 @@ const PORT = process.env.PORT || 5000;
 // Trust first proxy (required for rate limiter to see real IPs behind Nginx/Railway/Render)
 app.set('trust proxy', 1);
 
-// Security middleware
-app.use(helmet());
+// ── CORS: raw headers FIRST, before helmet or any other middleware ──────────
+// This guarantees preflight OPTIONS and all requests get the header,
+// regardless of what the cors package or helmet does.
+app.use((req, res, next) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400'); // cache preflight 24h
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
-// CORS — open to all origins so phones, tablets and any device can connect
-app.use(cors({
-  origin: true,   // reflect request origin (allows all)
-  credentials: true,
-}));
+// Security middleware
+app.use(helmet({ crossOriginResourcePolicy: false }));
+
+// CORS package (belt-and-suspenders backup)
+app.use(cors({ origin: true, credentials: true }));
 
 // Body parser middleware (increased limit for edge cases)
 app.use(express.json({ limit: '1mb' }));
