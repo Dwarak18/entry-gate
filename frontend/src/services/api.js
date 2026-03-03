@@ -27,7 +27,10 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    // Only force-logout on 401 for protected routes, NOT for login/auth requests
+    // (auth endpoints legitimately return 401 for wrong credentials)
+    const isAuthRequest = error.config?.url?.includes('/auth/');
+    if (error.response?.status === 401 && !isAuthRequest) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';

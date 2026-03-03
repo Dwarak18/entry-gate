@@ -23,7 +23,7 @@ export default function LoginPage() {
     try {
       const response = await authAPI.teamLogin({
         team_id: formData.team_id.trim(),
-        password: formData.password,
+        password: formData.password.trim(),
       });
       login(response.data.team, response.data.token);
       navigate('/quiz');
@@ -39,10 +39,11 @@ export default function LoginPage() {
   };
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   return (

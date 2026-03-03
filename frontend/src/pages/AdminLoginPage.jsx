@@ -20,7 +20,10 @@ export default function AdminLoginPage() {
     setLoading(true);
 
     try {
-      const response = await authAPI.adminLogin(formData);
+      const response = await authAPI.adminLogin({
+        username: formData.username.trim(),
+        password: formData.password.trim(),
+      });
       login({ ...response.data.admin, role: 'admin' }, response.data.token);
       navigate('/admin/dashboard');
     } catch (err) {
