@@ -25,6 +25,8 @@ export default function AdminDashboard() {
   const [editName, setEditName] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [showPasswordFor, setShowPasswordFor] = useState(null); // team id whose password is visible
+  const [showAllPasswords, setShowAllPasswords] = useState(false); // global reveal toggle
+  const [copiedTeamId, setCopiedTeamId] = useState(null); // which team's creds were just copied
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
   const [timerAction, setTimerAction] = useState(null); // 'starting' | 'resetting' | null
@@ -553,7 +555,17 @@ export default function AdminDashboard() {
                     <tr className="border-b border-outline">
                       <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Team Code</th>
                       <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Team Name</th>
-                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Password</th>
+                      <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">
+                        <div className="flex items-center gap-2">
+                          <span>Password</span>
+                          <button
+                            onClick={() => { setShowAllPasswords(v => !v); setShowPasswordFor(null); }}
+                            className={'px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all duration-150 ' + (showAllPasswords ? 'bg-primary text-on-primary' : 'bg-primary/10 text-primary hover:bg-primary/20')}
+                          >
+                            {showAllPasswords ? 'HIDE ALL' : 'SHOW ALL'}
+                          </button>
+                        </div>
+                      </th>
                       <th className="p-3 text-center text-on-surface-variant text-xs font-medium uppercase tracking-wide">Score</th>
                       <th className="p-3 text-center text-on-surface-variant text-xs font-medium uppercase tracking-wide">Rank</th>
                       <th className="p-3 text-left text-on-surface-variant text-xs font-medium uppercase tracking-wide">Status</th>
@@ -566,9 +578,32 @@ export default function AdminDashboard() {
                         key={team.id}
                         className="border-b border-outline-variant hover:bg-surface-bright transition-colors duration-150"
                       >
-                        {/* Team Code */}
-                        <td className="p-3 font-mono text-sm font-semibold text-primary/90">
-                          {team.team_id}
+                        {/* Team Code + copy button */}
+                        <td className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-sm font-semibold text-primary/90">{team.team_id}</span>
+                            <button
+                              onClick={() => {
+                                const text = `Team ID: ${team.team_id}\nPassword: ${team.plain_password || team.team_id}`;
+                                navigator.clipboard.writeText(text).then(() => {
+                                  setCopiedTeamId(team.id);
+                                  setTimeout(() => setCopiedTeamId(null), 2000);
+                                });
+                              }}
+                              className="p-1 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-150"
+                              title="Copy credentials"
+                            >
+                              {copiedTeamId === team.id ? (
+                                <svg className="w-3.5 h-3.5 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
                         </td>
 
                         {/* Team Name */}
@@ -576,15 +611,15 @@ export default function AdminDashboard() {
                           {team.team_name}
                         </td>
 
-                        {/* Password with eye toggle */}
+                        {/* Password — globally revealed or per-row toggle */}
                         <td className="p-3">
                           <div className="flex items-center gap-1.5">
-                            <span className="font-mono text-xs text-on-surface-variant">
-                              {showPasswordFor === team.id
+                            <span className={'font-mono text-xs ' + ((showAllPasswords || showPasswordFor === team.id) ? 'text-on-surface font-semibold' : 'text-on-surface-variant')}>
+                              {(showAllPasswords || showPasswordFor === team.id)
                                 ? (team.plain_password || <span className="italic opacity-50">not stored</span>)
                                 : (team.plain_password ? '••••••••' : <span className="italic opacity-50">—</span>)}
                             </span>
-                            {team.plain_password && (
+                            {team.plain_password && !showAllPasswords && (
                               <button
                                 onClick={() => setShowPasswordFor(showPasswordFor === team.id ? null : team.id)}
                                 className="p-1 rounded-lg text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-all duration-150"
