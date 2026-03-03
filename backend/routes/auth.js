@@ -7,7 +7,49 @@ import { loginLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
-// Team Login
+// Team Entry — no password, just team_id (used by the competition entry form)
+router.post('/team/enter', loginLimiter, async (req, res) => {
+  try {
+    const team_id = (req.body.team_id || '').trim();
+
+    if (!team_id) {
+      return res.status(400).json({ error: 'Team ID is required' });
+    }
+
+    const result = await pool.query(
+      'SELECT * FROM teams WHERE team_id = $1',
+      [team_id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: 'Team ID not found. Please check and try again.' });
+    }
+
+    const team = result.rows[0];
+
+    const token = generateToken({
+      id: team.id,
+      team_id: team.team_id,
+      team_name: team.team_name,
+      role: 'team'
+    });
+
+    res.json({
+      message: 'Login successful',
+      token,
+      team: {
+        id: team.id,
+        team_id: team.team_id,
+        team_name: team.team_name
+      }
+    });
+  } catch (error) {
+    console.error('Team entry error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Team Login (password-based, kept for compatibility)
 router.post('/team/login', loginLimiter, validateTeamLogin, async (req, res) => {
   try {
     const team_id = (req.body.team_id || '').trim();

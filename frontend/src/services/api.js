@@ -41,6 +41,7 @@ api.interceptors.response.use(
 
 // Auth APIs
 export const authAPI = {
+  teamEnter: (data) => api.post('/auth/team/enter', data),   // no-password entry
   teamLogin: (credentials) => api.post('/auth/team/login', credentials),
   adminLogin: (credentials) => api.post('/auth/admin/login', credentials),
   verifyToken: () => api.get('/auth/verify'),
