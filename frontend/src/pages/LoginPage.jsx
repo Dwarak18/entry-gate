@@ -21,11 +21,18 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const response = await authAPI.teamLogin(formData);
+      const response = await authAPI.teamLogin({
+        team_id: formData.team_id.trim(),
+        password: formData.password,
+      });
       login(response.data.team, response.data.token);
       navigate('/quiz');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Please try again.');
+      if (err.response?.status === 429) {
+        setError('Too many login attempts from this network. Please wait 15 minutes and try again.');
+      } else {
+        setError(err.response?.data?.error || 'Login failed. Please check your Team ID and password.');
+      }
     } finally {
       setLoading(false);
     }

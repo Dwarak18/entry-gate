@@ -27,6 +27,8 @@ export default function AdminDashboard() {
   const [showPasswordFor, setShowPasswordFor] = useState(null); // team id whose password is visible
   const [showAddPassword, setShowAddPassword] = useState(false);
   const [showEditPassword, setShowEditPassword] = useState(false);
+  const [timerAction, setTimerAction] = useState(null); // 'starting' | 'resetting' | null
+  const [timerResult, setTimerResult] = useState(null);
 
   useEffect(() => {
     if (activeTab === 'teams') {
@@ -215,6 +217,36 @@ export default function AdminDashboard() {
     navigate('/');
   };
 
+  const handleStartAllTimers = async () => {
+    if (!window.confirm('Start timer for ALL teams that have not started yet?')) return;
+    setTimerAction('starting');
+    setTimerResult(null);
+    try {
+      const res = await adminAPI.startAllTimers();
+      setTimerResult({ type: 'success', message: res.data.message });
+      fetchTeams();
+    } catch (err) {
+      setTimerResult({ type: 'error', message: err.response?.data?.error || 'Failed to start timers' });
+    } finally {
+      setTimerAction(null);
+    }
+  };
+
+  const handleResetAllTimers = async () => {
+    if (!window.confirm('Reset timer for ALL teams? Their quiz_started_at will be cleared and the clock will restart on their next login.')) return;
+    setTimerAction('resetting');
+    setTimerResult(null);
+    try {
+      const res = await adminAPI.resetAllTimers();
+      setTimerResult({ type: 'warning', message: res.data.message });
+      fetchTeams();
+    } catch (err) {
+      setTimerResult({ type: 'error', message: err.response?.data?.error || 'Failed to reset timers' });
+    } finally {
+      setTimerAction(null);
+    }
+  };
+
   const getStatusBadge = (status) => {
     const styles = {
       completed: 'bg-success-container text-success border border-success/20',
@@ -262,6 +294,44 @@ export default function AdminDashboard() {
               Logout
             </button>
           </div>
+        </div>
+
+        {/* Competition Timer Control */}
+        <div className="surface-1 rounded-3xl shadow-elevated-2 p-5 mb-6">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-semibold text-on-surface">Competition Control</h2>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Manage the quiz timer for all teams globally.
+              </p>
+            </div>
+            <div className="flex gap-3 flex-wrap">
+              <button
+                onClick={handleStartAllTimers}
+                disabled={!!timerAction}
+                className="px-5 py-2.5 rounded-2xl font-semibold text-sm bg-success-container text-success border border-success/20 hover:bg-success/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {timerAction === 'starting' ? '⏳ Starting…' : '▶ Start Timer'}
+              </button>
+              <button
+                onClick={handleResetAllTimers}
+                disabled={!!timerAction}
+                className="px-5 py-2.5 rounded-2xl font-semibold text-sm bg-warning-container text-warning border border-warning/20 hover:bg-warning/20 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {timerAction === 'resetting' ? '⏳ Resetting…' : '↺ Reset Timer (All)'}
+              </button>
+            </div>
+          </div>
+          {timerResult && (
+            <div className={`mt-3 px-4 py-2.5 rounded-2xl text-sm font-medium ${
+              timerResult.type === 'success' ? 'bg-success-container text-success border border-success/20' :
+              timerResult.type === 'warning' ? 'bg-warning-container text-warning border border-warning/20' :
+              'bg-error-container text-error border border-error/20'
+            }`}>
+              {timerResult.message}
+              <button onClick={() => setTimerResult(null)} className="ml-3 opacity-60 hover:opacity-100 text-base leading-none">×</button>
+            </div>
+          )}
         </div>
 
         {/* Tabs */}

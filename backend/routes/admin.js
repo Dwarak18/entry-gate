@@ -504,6 +504,39 @@ router.get('/export-results', authenticateAdmin, async (req, res) => {
   }
 });
 
+// Start timer for all teams that haven't started yet
+router.post('/start-all-timers', authenticateAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE teams SET quiz_started_at = NOW() WHERE quiz_started_at IS NULL RETURNING team_id`
+    );
+    res.json({
+      message: `Timer started for ${result.rowCount} team(s)`,
+      started: result.rowCount,
+      teams: result.rows.map(r => r.team_id),
+    });
+  } catch (error) {
+    console.error('Error starting timers:', error);
+    res.status(500).json({ error: 'Failed to start timers' });
+  }
+});
+
+// Reset timer for ALL teams (sets quiz_started_at = NULL so the clock resets on next login)
+router.post('/reset-all-timers', authenticateAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE teams SET quiz_started_at = NULL RETURNING team_id`
+    );
+    res.json({
+      message: `Timer reset for ${result.rowCount} team(s)`,
+      reset: result.rowCount,
+    });
+  } catch (error) {
+    console.error('Error resetting timers:', error);
+    res.status(500).json({ error: 'Failed to reset timers' });
+  }
+});
+
 // Delete a team (admin only)
 router.delete('/teams/:teamId', authenticateAdmin, async (req, res) => {
   try {

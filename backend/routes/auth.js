@@ -10,7 +10,8 @@ const router = express.Router();
 // Team Login
 router.post('/team/login', loginLimiter, validateTeamLogin, async (req, res) => {
   try {
-    const { team_id, password } = req.body;
+    const team_id = (req.body.team_id || '').trim();
+    const password = req.body.password || '';
 
     // Fetch team from database
     const result = await pool.query(

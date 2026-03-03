@@ -83,6 +83,8 @@ export const adminAPI = {
   deleteTeam: (teamId) => api.delete(`/admin/teams/${teamId}`),
   resetTeam: (teamId) => api.post(`/admin/reset-team/${teamId}`),
   getCheatLogs: () => api.get('/admin/cheat-logs'),
+  startAllTimers: () => api.post('/admin/start-all-timers'),
+  resetAllTimers: () => api.post('/admin/reset-all-timers'),
 };
 
 export default api;

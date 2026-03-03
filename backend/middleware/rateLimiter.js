@@ -1,13 +1,12 @@
 import rateLimit from 'express-rate-limit';
 
-const isProduction = process.env.NODE_ENV === 'production';
-const loginMaxRequests = isProduction ? 5 : 1000;
-
 // Rate limiter for login endpoints
+// Competition context: many teams login from the same IP (college network/proxy),
+// so we allow 200 attempts per 15 min window per IP.
 export const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: loginMaxRequests, // Strict in production, relaxed in non-production
-  message: 'Too many login attempts. Please try again after 15 minutes.',
+  max: 200,
+  message: { error: 'Too many login attempts from this network. Please try again after 15 minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
