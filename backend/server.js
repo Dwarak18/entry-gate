@@ -23,25 +23,33 @@ app.set('trust proxy', 1);
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration — allow multiple origins for flexibility
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map(o => o.trim());
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
 }));
 
-// Body parser middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parser middleware (increased limit for edge cases)
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-// Rate limiting
+// Rate limiting (applied to all /api/ routes)
 app.use('/api/', apiLimiter);
 
-// Health check endpoint
+// Health check — keeps Render/Railway from sleeping; load balancers use this
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     message: 'MCQ Competition API is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
@@ -85,7 +93,7 @@ async function runMigrations() {
 }
 
 runMigrations().then(() => {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`
 ╔════════════════════════════════════════════════════╗
 ║   🚀 MCQ Competition Platform - Backend API       ║
@@ -95,6 +103,12 @@ runMigrations().then(() => {
 ╚════════════════════════════════════════════════════╝
     `);
   });
+
+  // Keep-alive: prevents cloud load balancers from dropping idle connections
+  server.keepAliveTimeout = 65000;   // slightly above most LB 60s timeout
+  server.headersTimeout  = 70000;    // must be > keepAliveTimeout
+  // Hard cap per request: 30s before forceful close (prevents pool exhaustion)
+  server.requestTimeout  = 30000;
 });
 
 export default app;

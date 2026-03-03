@@ -12,19 +12,22 @@ export const loginLimiter = rateLimit({
 });
 
 // Rate limiter for general API endpoints
+// 50 teams × ~120 requests each = ~6,000 per session from one IP.
+// Keeping 10,000 per 15 min gives comfortable headroom.
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP. Please try again later.',
+  max: 10000,
+  message: { error: 'Too many requests from this IP. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
 // Rate limiter for anti-cheat activity logging
+// 50 teams on same IP: need at least 50 events/min headroom.
 export const activityLogLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 12, // 12 log events per minute max
-  message: 'Too many activity log requests.',
+  max: 500,
+  message: { error: 'Too many activity log requests.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
